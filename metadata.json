@@ -1,0 +1,6 @@
+{
+  "name": "StreamGet GUI - 多平台视频与直播录制桌面客户端",
+  "description": "基于 JS/React 全栈架构的跨平台视频与直播流解析下载桌面端，支持 40+ 平台批量解析录制、内嵌浏览器扫码登录、MediaMTX 流转发与弹幕信息采集。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
