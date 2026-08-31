@@ -36,7 +36,7 @@ class SettingsService {
 
   private loadFromStorage() {
     try {
-      const stored = localStorage.getItem('streamget_settings');
+      const stored = localStorage.getItem('rilaget_settings');
       if (stored) {
         this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
       }
@@ -52,7 +52,7 @@ class SettingsService {
   public updateSettings(updates: Partial<AppSettings>) {
     this.settings = { ...this.settings, ...updates };
     try {
-      localStorage.setItem('streamget_settings', JSON.stringify(this.settings));
+      localStorage.setItem('rilaget_settings', JSON.stringify(this.settings));
     } catch (e) {}
     logger.addLog('info', 'DOWNLOADER', '系统配置参数已更新保存');
     this.notify();
@@ -154,7 +154,7 @@ app.on('window-all-closed', () => {
     "bundle": {
       "active": true,
       "targets": "all",
-      "identifier": "com.streamget.desktop",
+      "identifier": "com.rilaget.desktop",
       "icon": ["icons/icon.png"]
     },
     "windows": [

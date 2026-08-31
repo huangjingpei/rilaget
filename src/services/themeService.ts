@@ -14,7 +14,7 @@ class ThemeService {
 
   private initTheme() {
     try {
-      const stored = localStorage.getItem('streamget_theme') as ThemeMode;
+      const stored = localStorage.getItem('rilaget_theme') as ThemeMode;
       if (stored === 'light' || stored === 'dark') {
         this.currentTheme = stored;
       } else {
@@ -38,7 +38,7 @@ class ThemeService {
   public setTheme(theme: ThemeMode) {
     this.currentTheme = theme;
     try {
-      localStorage.setItem('streamget_theme', theme);
+      localStorage.setItem('rilaget_theme', theme);
     } catch (e) {}
     this.applyThemeToDOM(theme);
     settingsService.updateSettings({ theme: theme as any });

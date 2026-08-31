@@ -67,7 +67,7 @@ export const SettingsView: React.FC = () => {
   const tauriConfCode = packageFiles[1].code;
 
   const packageJsonScripts = `{
-  "name": "streamget-desktop",
+  "name": "rilaget-desktop",
   "version": "1.0.0",
   "main": "electron/main.cjs",
   "scripts": {

@@ -114,7 +114,7 @@
 ## 4. 目录结构规范 (Directory Structure)
 
 ```
-streamget-desktop/
+rilaget-desktop/
 ├── public/                     # 静态图标与资源
 ├── src/
 │   ├── components/             # 页面与业务组件
