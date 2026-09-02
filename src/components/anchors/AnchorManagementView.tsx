@@ -114,6 +114,10 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
   const handleInstantRecord = async (anchor: MonitoredAnchor) => {
     try {
       const parsed = await parseStreamUrl(anchor.url);
+      if (!parsed.isLive || parsed.qualities.length === 0) {
+        alert(`${parsed.anchorName} 当前未开播，无法开始录制`);
+        return;
+      }
       const quality = parsed.qualities.find((q) => q.id === anchor.qualityPreference) || parsed.qualities[0];
       downloadEngine.addTask(parsed, quality);
       onNavigateToDownloader();

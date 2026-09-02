@@ -1,333 +1,430 @@
-import { PlatformInfo } from '../types';
+import { PlatformInfo, PlatformId } from '../types';
 
+function plat(
+  partial: Omit<PlatformInfo, 'supportsLive' | 'supportsVod' | 'supportsDanmaku' | 'supports4K'> &
+    Partial<Pick<PlatformInfo, 'supportsLive' | 'supportsVod' | 'supportsDanmaku' | 'supports4K'>>
+): PlatformInfo {
+  return {
+    supportsLive: true,
+    supportsVod: false,
+    supportsDanmaku: true,
+    supports4K: false,
+    ...partial,
+  };
+}
+
+/** 与 sidecar/bridge.py PLATFORM_REGISTRY 的 key / URL 正则对齐 */
 export const SUPPORTED_PLATFORMS: PlatformInfo[] = [
-  {
+  plat({
     id: 'douyin',
-    name: '抖音 (Douyin)',
+    name: '抖音',
     nameEn: 'Douyin',
     category: 'chinese',
     color: '#fe2c55',
     icon: 'Music2',
-    urlPattern: 'douyin.com|v.douyin.com|live.douyin.com',
-    sampleUrls: [
-      'https://live.douyin.com/80017709309',
-      'https://live.douyin.com/745261899120',
-      'https://v.douyin.com/iRoF123/'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'douyin\\.com',
+    sampleUrls: ['https://live.douyin.com/80017709309'],
     requiresCookieForHighRes: true,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'tiktok',
     name: 'TikTok',
     nameEn: 'TikTok',
     category: 'international',
     color: '#00f2fe',
     icon: 'Flame',
-    urlPattern: 'tiktok.com|vt.tiktok.com',
-    sampleUrls: [
-      'https://www.tiktok.com/@gameonlive/live',
-      'https://vt.tiktok.com/ZS234ab/'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'tiktok\\.com',
+    sampleUrls: ['https://www.tiktok.com/@gameonlive/live'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+  }),
+  plat({
     id: 'kuaishou',
-    name: '快手 (Kuaishou)',
+    name: '快手',
     nameEn: 'Kuaishou',
     category: 'chinese',
     color: '#ff5000',
     icon: 'Video',
-    urlPattern: 'kuaishou.com|live.kuaishou.com|v.kuaishou.com',
-    sampleUrls: [
-      'https://live.kuaishou.com/u/kuaishouofficial',
-      'https://live.kuaishou.com/u/3x59rwycquq8e4k'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'kuaishou\\.com',
+    sampleUrls: ['https://live.kuaishou.com/u/kuaishouofficial'],
     requiresCookieForHighRes: true,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'bilibili',
-    name: '哔哩哔哩 (Bilibili)',
+    name: '哔哩哔哩',
     nameEn: 'Bilibili',
     category: 'chinese',
     color: '#00a1d6',
     icon: 'Tv',
-    urlPattern: 'live.bilibili.com|bilibili.com/video|b23.tv',
-    sampleUrls: [
-      'https://live.bilibili.com/5440',
-      'https://live.bilibili.com/21686237',
-      'https://www.bilibili.com/video/BV1xx411c7mD'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'bilibili\\.com|b23\\.tv',
+    sampleUrls: ['https://live.bilibili.com/6'],
     requiresCookieForHighRes: true,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'huya',
-    name: '虎牙直播 (Huya)',
-    nameEn: 'Huya Live',
+    name: '虎牙直播',
+    nameEn: 'Huya',
     category: 'chinese',
     color: '#ffaa00',
     icon: 'Gamepad2',
-    urlPattern: 'huya.com',
-    sampleUrls: [
-      'https://www.huya.com/99999',
-      'https://www.huya.com/lpl'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'huya\\.com',
+    sampleUrls: ['https://www.huya.com/lpl'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'douyu',
-    name: '斗鱼直播 (Douyu)',
-    nameEn: 'Douyu Live',
+    name: '斗鱼直播',
+    nameEn: 'Douyu',
     category: 'chinese',
     color: '#ff6600',
     icon: 'Fish',
-    urlPattern: 'douyu.com',
-    sampleUrls: [
-      'https://www.douyu.com/9999',
-      'https://www.douyu.com/topic/lck'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'douyu\\.com',
+    sampleUrls: ['https://www.douyu.com/9999'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'xiaohongshu',
-    name: '小红书 (RedNote)',
-    nameEn: 'Xiaohongshu',
+    name: '小红书',
+    nameEn: 'RedNote',
     category: 'chinese',
     color: '#ff2442',
     icon: 'BookOpen',
-    urlPattern: 'xiaohongshu.com|xhslink.com',
-    sampleUrls: [
-      'https://www.xiaohongshu.com/user/profile/5b68...',
-      'http://xhslink.com/a/abcXYZ'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'xiaohongshu\\.com|xhslink\\.com',
+    sampleUrls: ['https://www.xiaohongshu.com/livestream/'],
     requiresCookieForHighRes: true,
-    defaultFormat: 'm3u8'
-  },
-  {
+    defaultFormat: 'm3u8',
+    parseWired: true,
+    supportsVod: true,
+  }),
+  plat({
     id: 'youtube',
     name: 'YouTube',
-    nameEn: 'YouTube Live & Video',
+    nameEn: 'YouTube',
     category: 'international',
     color: '#ff0000',
     icon: 'PlaySquare',
-    urlPattern: 'youtube.com|youtu.be',
-    sampleUrls: [
-      'https://www.youtube.com/watch?v=jfKfPfyJRdk',
-      'https://www.youtube.com/live/5qap5aO4i9A'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'youtube\\.com|youtu\\.be',
+    sampleUrls: ['https://www.youtube.com/watch?v=jfKfPfyJRdk'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'm3u8'
-  },
-  {
+    defaultFormat: 'm3u8',
+    parseWired: true,
+    supportsVod: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'twitch',
     name: 'Twitch',
-    nameEn: 'Twitch TV',
+    nameEn: 'Twitch',
     category: 'international',
     color: '#9146ff',
     icon: 'Radio',
-    urlPattern: 'twitch.tv',
-    sampleUrls: [
-      'https://www.twitch.tv/eslcs',
-      'https://www.twitch.tv/shroud'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'twitch\\.tv',
+    sampleUrls: ['https://www.twitch.tv/shroud'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'm3u8'
-  },
-  {
-    id: 'wechat_channels',
-    name: '微信视频号 (Channels)',
-    nameEn: 'WeChat Channels',
-    category: 'chinese',
-    color: '#07c160',
-    icon: 'MessageSquare',
-    urlPattern: 'channels.weixin.qq.com|finder.video.qq.com',
-    sampleUrls: [
-      'https://channels.weixin.qq.com/live/wx123456789'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: false,
-    supports4K: false,
-    requiresCookieForHighRes: true,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'm3u8',
+    parseWired: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'weibo',
-    name: '微博直播 (Weibo)',
-    nameEn: 'Weibo Live',
+    name: '微博直播',
+    nameEn: 'Weibo',
     category: 'chinese',
     color: '#eb1823',
     icon: 'Globe',
-    urlPattern: 'weibo.com|weibo.cn|yizhibo.com',
-    sampleUrls: [
-      'https://weibo.com/l/wblive/p/show/1022:232411...'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'weibo\\.(?:com|cn)',
+    sampleUrls: ['https://weibo.com/l/wblive/p/show/1022:232411'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+  }),
+  plat({
     id: 'acfun',
-    name: 'AcFun 弹幕视频网',
-    nameEn: 'AcFun Live',
+    name: 'AcFun',
+    nameEn: 'AcFun',
     category: 'chinese',
     color: '#fd4c5d',
     icon: 'Sparkles',
-    urlPattern: 'acfun.cn/live',
-    sampleUrls: [
-      'https://live.acfun.cn/live/236492'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'acfun\\.cn',
+    sampleUrls: ['https://live.acfun.cn/live/236492'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+  }),
+  plat({
+    id: 'inke',
+    name: '映客直播',
+    nameEn: 'Inke',
+    category: 'chinese',
+    color: '#ff6b81',
+    icon: 'Radio',
+    urlPattern: 'inke\\.cn',
+    sampleUrls: ['https://www.inke.cn/live.html'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
     id: 'yy',
-    name: 'YY 直播',
-    nameEn: 'YY Live',
+    name: 'YY直播',
+    nameEn: 'YY',
     category: 'chinese',
     color: '#ffe000',
     icon: 'RadioTower',
-    urlPattern: 'yy.com',
-    sampleUrls: [
-      'https://www.yy.com/991'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'yy\\.com',
+    sampleUrls: ['https://www.yy.com/991'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'flv'
-  },
-  {
+    defaultFormat: 'flv',
+    parseWired: true,
+    supportsVod: true,
+  }),
+  plat({
     id: 'chzzk',
-    name: 'CHZZK (Naver)',
+    name: 'CHZZK',
     nameEn: 'Naver CHZZK',
     category: 'international',
     color: '#00ffa3',
     icon: 'Cast',
-    urlPattern: 'chzzk.naver.com',
-    sampleUrls: [
-      'https://chzzk.naver.com/live/b2382f6e917'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'chzzk\\.naver\\.com',
+    sampleUrls: ['https://chzzk.naver.com/live/'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'm3u8'
-  },
-  {
+    defaultFormat: 'm3u8',
+    parseWired: true,
+    supports4K: true,
+  }),
+  plat({
     id: 'soop',
-    name: 'SOOP (AfreecaTV)',
-    nameEn: 'SOOP Global',
+    name: 'SOOP',
+    nameEn: 'SOOP / AfreecaTV',
     category: 'international',
     color: '#1a73e8',
     icon: 'MonitorPlay',
-    urlPattern: 'sooplive.com|afreecatv.com',
-    sampleUrls: [
-      'https://www.sooplive.co.kr/afreecatv'
-    ],
-    supportsLive: true,
-    supportsVod: true,
-    supportsDanmaku: true,
-    supports4K: true,
+    urlPattern: 'sooplive\\.co\\.kr|afreecatv\\.com',
+    sampleUrls: ['https://www.sooplive.co.kr/'],
     requiresCookieForHighRes: false,
-    defaultFormat: 'm3u8'
-  },
-  {
+    defaultFormat: 'm3u8',
+    parseWired: true,
+    supports4K: true,
+  }),
+  plat({
+    id: 'pandatv',
+    name: 'PandaTV',
+    nameEn: 'PandaTV',
+    category: 'international',
+    color: '#3b82f6',
+    icon: 'Tv',
+    urlPattern: 'panda\\.tv',
+    sampleUrls: ['https://www.panda.tv/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'm3u8',
+    parseWired: true,
+  }),
+  plat({
     id: 'shopee',
     name: 'Shopee Live',
-    nameEn: 'Shopee Live',
+    nameEn: 'Shopee',
     category: 'international',
     color: '#ee4d2d',
     icon: 'ShoppingBag',
-    urlPattern: 'shopee.tw|shopee.sg|shopee.co.id',
-    sampleUrls: [
-      'https://shopee.tw/live/12345'
-    ],
-    supportsLive: true,
-    supportsVod: false,
-    supportsDanmaku: true,
-    supports4K: false,
+    urlPattern: 'shopee',
+    sampleUrls: ['https://shopee.tw/live/'],
     requiresCookieForHighRes: true,
-    defaultFormat: 'flv'
-  }
-];
-
-export function detectPlatformFromUrl(url: string): PlatformInfo {
-  const cleanUrl = url.trim().toLowerCase();
-  for (const platform of SUPPORTED_PLATFORMS) {
-    const patterns = platform.urlPattern.split('|');
-    for (const pattern of patterns) {
-      if (cleanUrl.includes(pattern)) {
-        return platform;
-      }
-    }
-  }
-
-  // Fallback custom
-  return {
-    id: 'custom',
-    name: '通用流媒体 (Custom Stream)',
-    nameEn: 'Custom / Direct Stream',
-    category: 'other',
-    color: '#6366f1',
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'taobao',
+    name: '淘宝直播',
+    nameEn: 'Taobao',
+    category: 'chinese',
+    color: '#ff5000',
+    icon: 'ShoppingBag',
+    urlPattern: 'taobao\\.com',
+    sampleUrls: ['https://tbzb.taobao.com/'],
+    requiresCookieForHighRes: true,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'jd',
+    name: '京东直播',
+    nameEn: 'JD Live',
+    category: 'chinese',
+    color: '#e1251b',
+    icon: 'ShoppingBag',
+    urlPattern: 'jd\\.com',
+    sampleUrls: ['https://lives.jd.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'zhihu',
+    name: '知乎直播',
+    nameEn: 'Zhihu',
+    category: 'chinese',
+    color: '#0066ff',
+    icon: 'BookOpen',
+    urlPattern: 'zhihu\\.com',
+    sampleUrls: ['https://www.zhihu.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'netease',
+    name: '网易CC',
+    nameEn: 'Netease CC',
+    category: 'chinese',
+    color: '#c20c0c',
     icon: 'Radio',
-    urlPattern: 'm3u8|flv|mp4|rtmp|rtsp',
-    sampleUrls: ['https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8'],
-    supportsLive: true,
+    urlPattern: 'cc\\.163\\.com',
+    sampleUrls: ['https://cc.163.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'kugou',
+    name: '酷狗直播',
+    nameEn: 'Kugou',
+    category: 'chinese',
+    color: '#1e88e5',
+    icon: 'Music2',
+    urlPattern: 'kugou\\.com|fanxing\\.com',
+    sampleUrls: ['https://fanxing.kugou.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'bigo',
+    name: 'Bigo Live',
+    nameEn: 'Bigo',
+    category: 'international',
+    color: '#00c2ff',
+    icon: 'MonitorPlay',
+    urlPattern: 'bigo\\.tv',
+    sampleUrls: ['https://www.bigo.tv/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'm3u8',
+    parseWired: true,
+  }),
+  plat({
+    id: 'baidu',
+    name: '百度直播',
+    nameEn: 'Baidu Live',
+    category: 'chinese',
+    color: '#2932e1',
+    icon: 'Globe',
+    urlPattern: 'live\\.baidu\\.com',
+    sampleUrls: ['https://live.baidu.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'sixroom',
+    name: '六间房',
+    nameEn: 'SixRoom',
+    category: 'chinese',
+    color: '#8b5cf6',
+    icon: 'Tv',
+    urlPattern: '6\\.cn|sixroom\\.com',
+    sampleUrls: ['https://v.6.cn/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'huajiao',
+    name: '花椒直播',
+    nameEn: 'Huajiao',
+    category: 'chinese',
+    color: '#f43f5e',
+    icon: 'Flame',
+    urlPattern: 'huajiao\\.com',
+    sampleUrls: ['https://www.huajiao.com/'],
+    requiresCookieForHighRes: false,
+    defaultFormat: 'flv',
+    parseWired: true,
+  }),
+  plat({
+    id: 'wechat_channels',
+    name: '微信视频号',
+    nameEn: 'WeChat Channels',
+    category: 'chinese',
+    color: '#07c160',
+    icon: 'MessageSquare',
+    urlPattern: 'channels\\.weixin\\.qq.com|finder\\.video\\.qq.com',
+    sampleUrls: ['https://channels.weixin.qq.com/live/'],
+    requiresCookieForHighRes: true,
+    defaultFormat: 'flv',
+    parseWired: false,
     supportsVod: true,
     supportsDanmaku: false,
-    supports4K: true,
-    requiresCookieForHighRes: false,
-    defaultFormat: cleanUrl.includes('.flv') ? 'flv' : cleanUrl.includes('.mp4') ? 'mp4' : 'm3u8'
-  };
+  }),
+];
+
+export const WIRED_PLATFORM_COUNT = SUPPORTED_PLATFORMS.filter((p) => p.parseWired).length;
+
+export const CUSTOM_PLATFORM: PlatformInfo = {
+  id: 'custom',
+  name: '未识别平台',
+  nameEn: 'Unknown',
+  category: 'other',
+  color: '#6366f1',
+  icon: 'Radio',
+  urlPattern: '',
+  sampleUrls: [],
+  supportsLive: true,
+  supportsVod: true,
+  supportsDanmaku: false,
+  supports4K: false,
+  requiresCookieForHighRes: false,
+  defaultFormat: 'm3u8',
+  parseWired: false,
+};
+
+export function detectPlatformFromUrl(url: string): PlatformInfo {
+  const cleanUrl = url.trim();
+  for (const platform of SUPPORTED_PLATFORMS) {
+    try {
+      if (new RegExp(platform.urlPattern, 'i').test(cleanUrl)) {
+        return platform;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return CUSTOM_PLATFORM;
+}
+
+export function getPlatformById(id: PlatformId): PlatformInfo | undefined {
+  if (id === 'custom') return CUSTOM_PLATFORM;
+  return SUPPORTED_PLATFORMS.find((p) => p.id === id);
 }

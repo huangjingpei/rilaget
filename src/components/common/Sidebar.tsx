@@ -64,7 +64,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     {
       id: 'downloader',
       label: '视频与直播下载',
-      sub: '40+平台多码率解析录制',
+      sub: 'Python sidecar 真实解析',
       icon: DownloadCloud,
       badge: downloadCount > 0 ? downloadCount : null,
       badgeColor: 'bg-cyan-500 text-slate-950 font-bold',
@@ -166,15 +166,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs text-slate-300 font-medium">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>JS 跨平台核心</span>
+              <span>解析内核</span>
             </div>
             <span className="text-[10px] font-mono text-cyan-400 bg-cyan-950/60 px-1.5 py-0.5 rounded border border-cyan-800/40">
-              Vite + React
+              Python sidecar
             </span>
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            支持一键封装为 Electron 或 Tauri 跨平台桌面端，内置流媒体解码与 MediaMTX 转发。
+            UI 走 Vite + React；真实拉流解析由本机 Python 边车完成。下载落盘仍为模拟，见后续 FFmpeg 引擎。
           </p>
 
           <button

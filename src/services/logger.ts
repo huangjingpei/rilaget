@@ -8,9 +8,7 @@ class LoggerService {
   private maxLogs = 500;
 
   constructor() {
-    this.addLog('info', 'DOWNLOADER', 'StreamGet JS Client Engine 初始化完成，等待任务指令...');
-    this.addLog('debug', 'PARSER', '40+ 平台解析器规则库 (Douyin, TikTok, Bilibili, Huya, Douyu, etc.) 已就绪');
-    this.addLog('info', 'RELAY', 'MediaMTX 转发中继子系统就绪，默认监听 rtmp://127.0.0.1:1935');
+    this.addLog('info', 'PARSER', '前端已就绪。真实解析走 Python sidecar（npm run sidecar / npm run dev:full）');
   }
 
   public addLog(

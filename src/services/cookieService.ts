@@ -100,8 +100,18 @@ class CookieService {
   }
 
   public getCookieForPlatform(platform: PlatformId): string | undefined {
-    const match = this.cookies.find((c) => c.platform === platform && c.isValid);
+    const match = this.cookies.find(
+      (c) => c.platform === platform && c.isValid && this.isUsableCookieString(c.cookieString)
+    );
     return match?.cookieString;
+  }
+
+  /** 原型预置的截断假 Cookie（含 ...）不得发给 sidecar */
+  private isUsableCookieString(value: string): boolean {
+    const t = value.trim();
+    if (t.length < 24) return false;
+    if (t.includes('...')) return false;
+    return true;
   }
 
   public getCookies(): PlatformCookie[] {

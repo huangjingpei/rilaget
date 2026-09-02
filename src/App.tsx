@@ -15,6 +15,7 @@ import { MediaRelayView } from './components/relay/MediaRelayView';
 import { DataScraperView } from './components/scraper/DataScraperView';
 import { SettingsView } from './components/settings/SettingsView';
 import { themeService, ThemeMode } from './services/themeService';
+import { connectSidecarEvents } from './services/sidecarClient';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('downloader');
@@ -33,6 +34,10 @@ export default function App() {
       setTheme(t);
     });
     return unsub;
+  }, []);
+
+  useEffect(() => {
+    return connectSidecarEvents();
   }, []);
 
   const handleOpenPlayer = (url: string, title: string, isLive: boolean = true) => {

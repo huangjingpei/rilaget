@@ -24,12 +24,12 @@ import {
   Search,
   CheckCircle2
 } from 'lucide-react';
-import { SUPPORTED_PLATFORMS, detectPlatformFromUrl } from '../../data/platforms';
+import { SUPPORTED_PLATFORMS, WIRED_PLATFORM_COUNT, detectPlatformFromUrl } from '../../data/platforms';
 import { ParsedStreamResult, DownloadTask, StreamQuality } from '../../types';
 import { parseStreamUrl } from '../../services/streamParser';
 import { downloadEngine } from '../../services/downloadEngine';
 import { cookieService } from '../../services/cookieService';
-import { anchorService } from '../../services/anchorService';
+import { fetchSidecarStatus, SidecarStatus } from '../../services/sidecarClient';
 import { DownloadCard } from './DownloadCard';
 
 interface DownloaderViewProps {
@@ -52,6 +52,7 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const [tasks, setTasks] = useState<DownloadTask[]>([]);
+  const [sidecarStatus, setSidecarStatus] = useState<SidecarStatus | null>(null);
 
   useEffect(() => {
     if (presetUrl) {
@@ -67,6 +68,20 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
     return unsub;
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const status = await fetchSidecarStatus();
+      if (!cancelled) setSidecarStatus(status);
+    };
+    refresh();
+    const timer = setInterval(refresh, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
+
   const currentPlatform = detectPlatformFromUrl(urlInput);
 
   const handleParse = async (urlToParse?: string) => {
@@ -77,18 +92,21 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
     }
 
     setParseError(null);
+    setParsedResult(null);
+    setSelectedQuality(null);
     setIsParsing(true);
 
     try {
       const platformInfo = detectPlatformFromUrl(target);
+      if (!platformInfo.parseWired && platformInfo.id !== 'custom') {
+        throw new Error(`「${platformInfo.name}」尚未接入 sidecar 解析，请换用已接线平台`);
+      }
       const cookie = cookieService.getCookieForPlatform(platformInfo.id);
       const res = await parseStreamUrl(target, cookie);
       setParsedResult(res);
-      if (res.qualities.length > 0) {
-        setSelectedQuality(res.qualities[0]);
-      }
+      setSelectedQuality(res.qualities[0] || null);
     } catch (err: any) {
-      setParseError(err.message || '解析失败，请检查链接有效性或平台服务状态');
+      setParseError(err.message || '解析失败，请确认边车已启动且链接有效');
     } finally {
       setIsParsing(false);
     }
@@ -96,8 +114,13 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
 
   const handleStartDownload = () => {
     if (!parsedResult || !selectedQuality) return;
+    if (!parsedResult.isLive) {
+      setParseError('当前房间未开播，无法开始录制');
+      return;
+    }
     downloadEngine.addTask(parsedResult, selectedQuality);
     setParsedResult(null);
+    setSelectedQuality(null);
     setUrlInput('');
   };
 
@@ -115,22 +138,31 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
     setIsParsing(true);
     setParseError(null);
 
+    const failures: string[] = [];
+    let queued = 0;
+
     for (const line of lines) {
       try {
         const platformInfo = detectPlatformFromUrl(line);
         const cookie = cookieService.getCookieForPlatform(platformInfo.id);
         const parsed = await parseStreamUrl(line, cookie);
-        if (parsed.qualities.length > 0) {
-          downloadEngine.addTask(parsed, parsed.qualities[0]);
+        if (!parsed.isLive || parsed.qualities.length === 0) {
+          failures.push(`${line} → 未开播`);
+          continue;
         }
-      } catch (e) {
-        console.error('Batch item parse failed:', line);
+        downloadEngine.addTask(parsed, parsed.qualities[0]);
+        queued += 1;
+      } catch (e: any) {
+        failures.push(`${line} → ${e?.message || '解析失败'}`);
       }
     }
 
     setIsParsing(false);
     setUrlInput('');
     setIsBatchMode(false);
+    if (failures.length > 0) {
+      setParseError(`成功入队 ${queued} 条；失败 ${failures.length} 条：${failures.slice(0, 3).join('；')}`);
+    }
   };
 
   const filteredTasks = tasks.filter((t) => {
@@ -175,7 +207,21 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
               <DownloadCloud className="w-3.5 h-3.5" />
             </div>
             <span className="text-xs font-bold text-white">多平台视频/直播解析提取</span>
-            <span className="text-[10px] text-slate-400 font-mono">支持 抖音/快手/B站/虎牙/TikTok/YouTube 等</span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              sidecar 已接线 {WIRED_PLATFORM_COUNT} 个平台
+            </span>
+            <span
+              className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                sidecarStatus?.running && sidecarStatus?.pong
+                  ? 'text-emerald-300 border-emerald-800 bg-emerald-950/40'
+                  : 'text-amber-300 border-amber-800 bg-amber-950/40'
+              }`}
+              title={sidecarStatus?.error || sidecarStatus?.python || ''}
+            >
+              {sidecarStatus?.running && sidecarStatus?.pong
+                ? `边车在线${sidecarStatus.pong.version ? ` v${sidecarStatus.pong.version}` : ''}`
+                : '边车离线 · npm run sidecar'}
+            </span>
           </div>
 
           <div className="flex items-center p-0.5 bg-slate-950 rounded-lg border border-slate-800">
@@ -252,19 +298,19 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
 
         {/* Quick Presets */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[10px] text-slate-500 font-medium">预设测试:</span>
-          {SUPPORTED_PLATFORMS.slice(0, 7).map((plat) => (
+          <span className="text-[10px] text-slate-500 font-medium">填入示例（需真实开播间才能解析成功）:</span>
+          {SUPPORTED_PLATFORMS.filter((p) => p.parseWired).slice(0, 8).map((plat) => (
             <button
               key={plat.id}
               onClick={() => {
-                const sample = plat.sampleUrls[0];
-                setUrlInput(sample);
-                handleParse(sample);
+                setUrlInput(plat.sampleUrls[0]);
+                setParsedResult(null);
+                setParseError(null);
               }}
               className="px-2 py-0.5 rounded bg-slate-950 hover:bg-slate-800 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-1 transition-colors"
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: plat.color }} />
-              <span>{plat.name.split(' ')[0]}</span>
+              <span>{plat.name}</span>
             </button>
           ))}
         </div>
@@ -279,50 +325,100 @@ export const DownloaderView: React.FC<DownloaderViewProps> = ({
 
       {/* Parsed Result Inline Dialog / Drawer if available */}
       {parsedResult && (
-        <div className="p-3 rounded-xl bg-gradient-to-r from-slate-900 to-slate-900/90 border border-cyan-500/50 shadow-md shrink-0 flex items-center justify-between gap-4 animate-in fade-in">
-          <div className="flex items-center gap-3 min-w-0">
-            <img
-              src={parsedResult.coverUrl}
-              alt={parsedResult.title}
-              className="w-14 h-10 object-cover rounded-lg border border-slate-700 shrink-0"
-            />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-white truncate max-w-sm">{parsedResult.title}</span>
-                <span className="px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-400 text-[10px] font-mono">
-                  {parsedResult.statusText}
-                </span>
+        <div className="p-3 rounded-xl bg-gradient-to-r from-slate-900 to-slate-900/90 border border-cyan-500/50 shadow-md shrink-0 space-y-2.5 animate-in fade-in">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              {parsedResult.coverUrl ? (
+                <img
+                  src={parsedResult.coverUrl}
+                  alt={parsedResult.title}
+                  className="w-14 h-10 object-cover rounded-lg border border-slate-700 shrink-0"
+                />
+              ) : (
+                <div className="w-14 h-10 rounded-lg border border-slate-700 shrink-0 bg-slate-800 flex items-center justify-center text-[9px] text-slate-400 font-mono">
+                  {parsedResult.platformName.slice(0, 4)}
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-white truncate max-w-sm">{parsedResult.title}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${
+                      parsedResult.isLive
+                        ? 'bg-rose-500/20 text-rose-400'
+                        : 'bg-slate-700/80 text-slate-300'
+                    }`}
+                  >
+                    {parsedResult.statusText}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
+                  <span>
+                    主播: <strong className="text-slate-200">{parsedResult.anchorName}</strong>
+                  </span>
+                  <span>•</span>
+                  <span>{parsedResult.platformName}</span>
+                </div>
               </div>
-              <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-                <span>主播: <strong className="text-slate-200">{parsedResult.anchorName}</strong></span>
-                <span>•</span>
-                <span>清晰度: <strong className="text-cyan-300">{selectedQuality?.name}</strong></span>
-              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleStartDownload}
+                disabled={!parsedResult.isLive || !selectedQuality}
+                className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1 shadow disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <DownloadCloud className="w-3.5 h-3.5" />
+                <span>{parsedResult.isLive ? '开始录制' : '未开播'}</span>
+              </button>
+              <button
+                disabled={!selectedQuality?.url}
+                onClick={() =>
+                  onOpenPlayer(
+                    selectedQuality?.url || '',
+                    parsedResult.title,
+                    parsedResult.isLive
+                  )
+                }
+                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium flex items-center gap-1 border border-slate-700 disabled:opacity-40"
+              >
+                <Eye className="w-3.5 h-3.5 text-cyan-400" />
+                <span>试看</span>
+              </button>
+              <button
+                onClick={() => {
+                  setParsedResult(null);
+                  setSelectedQuality(null);
+                }}
+                className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs"
+              >
+                取消
+              </button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
-            <button
-              onClick={handleStartDownload}
-              className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1 shadow"
-            >
-              <DownloadCloud className="w-3.5 h-3.5" />
-              <span>{parsedResult.isLive ? '开始录制' : '开始下载'}</span>
-            </button>
-            <button
-              onClick={() => onOpenPlayer(selectedQuality?.url || parsedResult.qualities[0]?.url, parsedResult.title, parsedResult.isLive)}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-medium flex items-center gap-1 border border-slate-700"
-            >
-              <Eye className="w-3.5 h-3.5 text-cyan-400" />
-              <span>试看</span>
-            </button>
-            <button
-              onClick={() => setParsedResult(null)}
-              className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs"
-            >
-              取消
-            </button>
-          </div>
+          {parsedResult.qualities.length > 0 ? (
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[10px] text-slate-500 shrink-0">清晰度:</span>
+              {parsedResult.qualities.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => setSelectedQuality(q)}
+                  className={`px-2 py-0.5 rounded border text-[10px] font-mono transition-colors ${
+                    selectedQuality?.id === q.id
+                      ? 'bg-cyan-600 text-white border-cyan-400'
+                      : 'bg-slate-950 text-slate-300 border-slate-700 hover:border-cyan-700'
+                  }`}
+                >
+                  {q.name} · {q.format.toUpperCase()}
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="text-[11px] text-amber-300">
+              未拿到可录制的流地址。房间可能未开播，或该平台需要有效 Cookie / Node 运行时。
+            </p>
+          )}
         </div>
       )}
 

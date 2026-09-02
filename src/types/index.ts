@@ -17,6 +17,15 @@ export type PlatformId =
   | 'soop'
   | 'pandatv'
   | 'shopee'
+  | 'taobao'
+  | 'jd'
+  | 'zhihu'
+  | 'netease'
+  | 'kugou'
+  | 'bigo'
+  | 'baidu'
+  | 'sixroom'
+  | 'huajiao'
   | 'custom';
 
 export interface PlatformInfo {
@@ -34,6 +43,8 @@ export interface PlatformInfo {
   supports4K: boolean;
   requiresCookieForHighRes: boolean;
   defaultFormat: 'flv' | 'm3u8' | 'mp4';
+  /** 已接入 Python sidecar 真实解析 */
+  parseWired: boolean;
 }
 
 export interface StreamQuality {

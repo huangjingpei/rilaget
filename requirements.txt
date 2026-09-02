@@ -1,0 +1,26 @@
+# StreamGet Python sidecar（sidecar/bridge.py + vendored streamget）
+# Python 3.10+
+#
+# 安装：
+#   pip install -r requirements.txt
+#
+# 启动边车（另开终端，或用 npm run dev:full）：
+#   npm run sidecar
+#
+# 抖音 / 斗鱼 / LiveMe 等平台签名依赖 Node.js。本机已有 Node 即可；
+# 若解析报 execjs / node 相关错误，可在 sidecar 目录执行：
+#   cd sidecar/StreamGet
+#   python -m streamget.cli install-node
+#
+# 指定解释器：
+#   set SIDECAR_PYTHON=py -3     (Windows)
+#   export SIDECAR_PYTHON=python3
+
+requests>=2.34.2
+loguru>=0.7.3
+pycryptodome>=3.23.0
+distro>=1.9.0
+tqdm>=4.68.3
+httpx[http2]>=0.28.1
+PyExecJS>=1.5.1
+deprecated>=1.3.1
