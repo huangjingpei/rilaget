@@ -66,6 +66,19 @@ input[type="range"] {
 }
 
 /* ========================================================================= */
+/* Frameless Electron window: draggable regions                              */
+/* ========================================================================= */
+.app-drag {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* ========================================================================= */
 /* Comprehensive Light Theme Mode Overrides ([data-theme="light"] / .light)  */
 /* ========================================================================= */
 [data-theme="light"],

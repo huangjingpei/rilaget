@@ -1,5 +1,9 @@
 import { AppSettings } from '../types';
 import { logger } from './logger';
+import { loadStore, saveStore } from './persistence';
+import { electronApi, inElectron } from './electronBridge';
+
+const LS_SETTINGS_KEY = 'rilaget_settings';
 
 const DEFAULT_SETTINGS: AppSettings = {
   downloadDir: 'C:/StreamGet/Downloads',
@@ -21,6 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   enableSoundAlerts: true,
   theme: 'cyber',
   autoStartOnBoot: false,
+  minimizeToTray: true,
   showDanmakuOverlay: true,
 };
 
@@ -29,20 +34,31 @@ type SettingsListener = (settings: AppSettings) => void;
 class SettingsService {
   private settings: AppSettings = DEFAULT_SETTINGS;
   private listeners: Set<SettingsListener> = new Set();
+  private hasLocalChanges = false;
 
   constructor() {
-    this.loadFromStorage();
+    this.loadFromLocalStorage();
+    void this.hydrateFromStore();
   }
 
-  private loadFromStorage() {
+  private loadFromLocalStorage() {
     try {
-      const stored = localStorage.getItem('rilaget_settings');
+      const stored = localStorage.getItem(LS_SETTINGS_KEY);
       if (stored) {
         this.settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
       }
-    } catch (e) {
+    } catch {
       this.settings = DEFAULT_SETTINGS;
     }
+  }
+
+  /** Electron 主进程在关闭窗口时需要读 settings（如 minimizeToTray），
+   *  故启动时从主进程 store 回灌一次，避免 localStorage 与磁盘不一致。 */
+  private async hydrateFromStore() {
+    const stored = await loadStore<AppSettings>('settings');
+    if (!stored || this.hasLocalChanges) return;
+    this.settings = { ...this.settings, ...stored };
+    this.notify();
   }
 
   public getSettings(): AppSettings {
@@ -50,10 +66,14 @@ class SettingsService {
   }
 
   public updateSettings(updates: Partial<AppSettings>) {
+    this.hasLocalChanges = true;
     this.settings = { ...this.settings, ...updates };
     try {
-      localStorage.setItem('rilaget_settings', JSON.stringify(this.settings));
-    } catch (e) {}
+      localStorage.setItem(LS_SETTINGS_KEY, JSON.stringify(this.settings));
+    } catch {
+      /* ignore */
+    }
+    void saveStore('settings', this.settings);
     logger.addLog('info', 'DOWNLOADER', '系统配置参数已更新保存');
     this.notify();
   }
@@ -70,108 +90,57 @@ class SettingsService {
     this.listeners.forEach((l) => l(this.settings));
   }
 
-  // Generates Electron main.js template for cross-platform desktop wrapper
-  public getElectronPackagingCode(): { filename: string; code: string }[] {
-    return [
-      {
-        filename: 'electron/main.cjs',
-        code: `const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
-const path = require('path');
-const { spawn } = require('child_process');
-
-let mainWindow;
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1320,
-    height: 860,
-    minWidth: 1024,
-    minHeight: 700,
-    frame: false, // Frameless custom desktop titlebar
-    titleBarStyle: 'hidden',
-    backgroundColor: '#020617',
-    webPreferences: {
-      nodeIntegration: true,
-      contextIsolation: false,
-      webviewTag: true,
-      webSecurity: false // Enables cross-origin stream inspection
+  /** Electron 内弹出系统目录选择器；浏览器模式不可用返回 null */
+  public async pickDownloadDirectory(): Promise<string | null> {
+    const api = electronApi();
+    if (!inElectron() || !api) return null;
+    const dir = await api.dialog.selectDirectory();
+    if (dir) {
+      this.updateSettings({ downloadDir: dir, downloadPath: dir });
     }
-  });
-
-  const isDev = !app.isPackaged;
-  if (isDev) {
-    mainWindow.loadURL('http://localhost:3000');
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+    return dir;
   }
 
-  // Open external links in default OS browser
-  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
-    return { action: 'deny' };
-  });
-}
-
-// Window control IPC handlers
-ipcMain.on('window-minimize', () => mainWindow?.minimize());
-ipcMain.on('window-maximize', () => {
-  if (mainWindow?.isMaximized()) {
-    mainWindow.unmaximize();
-  } else {
-    mainWindow?.maximize();
-  }
-});
-ipcMain.on('window-close', () => mainWindow?.close());
-
-// Directory picker dialog
-ipcMain.handle('select-directory', async () => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory', 'createDirectory']
-  });
-  return result.filePaths[0];
-});
-
-app.whenReady().then(createWindow);
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
-`
-      },
-      {
-        filename: 'src-tauri/tauri.conf.json',
-        code: `{
-  "package": {
-    "productName": "StreamGet",
-    "version": "1.0.0"
-  },
-  "build": {
-    "distDir": "../dist",
-    "devPath": "http://localhost:3000",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
-  },
-  "tauri": {
-    "bundle": {
-      "active": true,
-      "targets": "all",
-      "identifier": "com.rilaget.desktop",
-      "icon": ["icons/icon.png"]
-    },
-    "windows": [
-      {
-        "title": "StreamGet - 多平台视频直播录制客户端",
-        "width": 1320,
-        "height": 860,
-        "resizable": true,
-        "fullscreen": false,
-        "decorations": false,
-        "transparent": false
+  public async getAutoStart(): Promise<boolean> {
+    const api = electronApi();
+    if (inElectron() && api) {
+      try {
+        return await api.app.getAutoStart();
+      } catch {
+        /* fallthrough */
       }
-    ]
+    }
+    return Boolean(this.settings.autoStartOnBoot);
   }
-}`
+
+  public async setAutoStart(enabled: boolean): Promise<boolean> {
+    const api = electronApi();
+    this.updateSettings({ autoStartOnBoot: enabled });
+    if (inElectron() && api) {
+      try {
+        const applied = await api.app.setAutoStart(enabled);
+        this.updateSettings({ autoStartOnBoot: applied });
+        return applied;
+      } catch (err: any) {
+        logger.addLog('warn', 'DOWNLOADER', `设置开机自启失败: ${err?.message || '未知错误'}`);
+        return enabled;
       }
-    ];
+    }
+    return enabled;
+  }
+
+  public async openDownloadsFolder(): Promise<void> {
+    const api = electronApi();
+    const dir = this.settings.downloadDir || this.settings.downloadPath;
+    if (inElectron() && api) {
+      try {
+        await api.app.openPath(dir);
+        return;
+      } catch {
+        /* fallthrough */
+      }
+    }
+    logger.addLog('warn', 'DOWNLOADER', `浏览器模式无法打开本地目录: ${dir}`);
   }
 }
 

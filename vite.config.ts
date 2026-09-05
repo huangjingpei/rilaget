@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // Electron 打包后以 file:// 加载 dist，资源必须使用相对路径
+    base: './',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {

@@ -1,14 +1,26 @@
 import { PlatformCookie, PlatformId } from '../types';
 import { logger } from './logger';
+import { loadStore, makePersister } from './persistence';
 
 type CookieListener = (cookies: PlatformCookie[]) => void;
 
 class CookieService {
   private cookies: PlatformCookie[] = [];
   private listeners: Set<CookieListener> = new Set();
+  private hasLocalChanges = false;
+  private persister = makePersister('cookies', () => this.cookies, 800);
 
   constructor() {
     this.initDefaultCookies();
+    void this.hydrate();
+  }
+
+  private async hydrate() {
+    const stored = await loadStore<PlatformCookie[]>('cookies');
+    if (this.hasLocalChanges || !Array.isArray(stored)) return;
+    this.cookies = stored;
+    logger.addLog('info', 'BROWSER', `已从本地存储恢复 ${this.cookies.length} 条平台凭据`);
+    this.notify();
   }
 
   private initDefaultCookies() {
@@ -53,6 +65,7 @@ class CookieService {
   }
 
   public addCookie(cookie: Omit<PlatformCookie, 'id' | 'lastTestedAt'>): PlatformCookie {
+    this.hasLocalChanges = true;
     const newCookie: PlatformCookie = {
       ...cookie,
       id: 'ck_' + Math.random().toString(36).substring(2, 9),
@@ -61,21 +74,26 @@ class CookieService {
 
     this.cookies = [newCookie, ...this.cookies];
     logger.addLog('success', 'BROWSER', `成功录入平台 [${cookie.platform.toUpperCase()}] 账号 Cookie: ${cookie.accountName}`);
+    this.persister.schedule();
     this.notify();
     return newCookie;
   }
 
   public updateCookie(id: string, updates: Partial<PlatformCookie>) {
+    this.hasLocalChanges = true;
     this.cookies = this.cookies.map((c) => (c.id === id ? { ...c, ...updates, lastTestedAt: Date.now() } : c));
+    this.persister.schedule();
     this.notify();
   }
 
   public deleteCookie(id: string) {
+    this.hasLocalChanges = true;
     const item = this.cookies.find((c) => c.id === id);
     if (item) {
       logger.addLog('info', 'BROWSER', `删除凭据: [${item.platform}] ${item.accountName}`);
     }
     this.cookies = this.cookies.filter((c) => c.id !== id);
+    this.persister.schedule();
     this.notify();
   }
 

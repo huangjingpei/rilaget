@@ -62,7 +62,27 @@ def emit_log(level: str, message: str) -> None:
 _LIB_DIR = Path(__file__).resolve().parent / "StreamGet"
 sys.path.insert(0, str(_LIB_DIR))
 
-import streamget  # noqa: E402
+_streamget_module = None
+_streamget_error = None
+
+
+def _load_streamget():
+    """惰性加载 vendored streamget：避免库缺失/依赖不全时整个桥无法应答 ping。"""
+    global _streamget_module, _streamget_error
+    if _streamget_module is not None:
+        return _streamget_module
+    if _streamget_error is not None:
+        raise _streamget_error
+    try:
+        import streamget  # noqa: E402
+
+        _streamget_module = streamget
+        return streamget
+    except Exception as exc:
+        _streamget_error = RuntimeError(
+            f"streamget 解析库不可用: {exc}（请先 pip install -r sidecar/StreamGet/requirements.txt）"
+        )
+        raise _streamget_error from exc
 
 QUALITY_ORDER = ["OD", "UHD", "HD", "SD", "LD"]
 QUALITY_LABEL = {"OD": "原画", "UHD": "超清", "HD": "高清", "SD": "标清", "LD": "流畅"}
@@ -122,15 +142,21 @@ async def _probe_quality(live, web_data, quality):
 
 # ---------------------------------------------------------------- 命令实现
 async def cmd_ping(_req):
+    version = "unavailable"
+    try:
+        version = getattr(_load_streamget(), "__version__", "unknown")
+    except Exception:
+        pass
     return {
         "pong": True,
-        "version": getattr(streamget, "__version__", "unknown"),
+        "version": version,
         "python": sys.version.split()[0],
         "platforms": len(PLATFORM_REGISTRY),
     }
 
 
 async def cmd_platforms(_req):
+    streamget = _load_streamget()
     return [
         {"key": key, "label": label, "class": cls, "available": hasattr(streamget, cls)}
         for key, label, _pattern, cls in PLATFORM_REGISTRY
@@ -138,6 +164,7 @@ async def cmd_platforms(_req):
 
 
 async def cmd_parse(req):
+    streamget = _load_streamget()
     url = str(req.get("url") or "").strip()
     if not url:
         raise ValueError("缺少 url 参数")
@@ -216,10 +243,14 @@ PARSE_TIMEOUT_S = 90
 
 
 def main() -> int:
+    version = "unavailable"
+    try:
+        version = getattr(_load_streamget(), "__version__", "?")
+    except Exception:
+        emit_log("warn", "streamget 解析库未就绪，仅 ping/platforms 可用（见 README 安装依赖）")
     emit_log(
         "info",
-        f"bridge 就绪: streamget v{getattr(streamget, '__version__', '?')} "
-        f"/ python {sys.version.split()[0]} / {len(PLATFORM_REGISTRY)} 平台",
+        f"bridge 就绪: streamget v{version} / python {sys.version.split()[0]} / {len(PLATFORM_REGISTRY)} 平台",
     )
     while True:
         line = sys.stdin.readline()

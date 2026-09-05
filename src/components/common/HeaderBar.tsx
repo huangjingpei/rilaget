@@ -18,6 +18,7 @@ import {
 import { downloadEngine } from '../../services/downloadEngine';
 import { relayService } from '../../services/relayService';
 import { themeService, ThemeMode } from '../../services/themeService';
+import { inElectron } from '../../services/electronBridge';
 
 interface HeaderBarProps {
   activeTab: string;
@@ -41,6 +42,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   const [isMaximized, setIsMaximized] = useState(false);
   const [theme, setTheme] = useState<ThemeMode>(themeService.getTheme());
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const isElectron = inElectron();
 
   useEffect(() => {
     const unsubDown = downloadEngine.subscribe((tasks) => {
@@ -62,12 +64,19 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       setTheme(t);
     });
 
+    let unsubMaximized: (() => void) | undefined;
+    if (isElectron && window.streamget) {
+      window.streamget.window.isMaximized().then(setIsMaximized).catch(() => {});
+      unsubMaximized = window.streamget.window.onMaximized(setIsMaximized);
+    }
+
     return () => {
       unsubDown();
       unsubRelay();
       unsubTheme();
+      unsubMaximized?.();
     };
-  }, []);
+  }, [isElectron]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -91,10 +100,18 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   };
 
   const handleMinimize = () => {
-    showToast('StreamGet 已最小化至后台托盘，正在持续监听与录制中...');
+    if (isElectron && window.streamget) {
+      window.streamget.window.minimize();
+      return;
+    }
+    showToast('StreamGet 已最小化至后台托盘（浏览器预览模式仅作提示）');
   };
 
   const handleMaximize = () => {
+    if (isElectron && window.streamget) {
+      window.streamget.window.maximize().then(setIsMaximized).catch(() => {});
+      return;
+    }
     const willBeMax = !isMaximized;
     setIsMaximized(willBeMax);
     if (willBeMax) {
@@ -111,11 +128,24 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   };
 
   const handleClose = () => {
-    showToast('StreamGet 客户端已转入后台系统托盘静默运行');
+    if (isElectron && window.streamget) {
+      // 主进程按 settings.minimizeToTray 决定是隐藏到托盘还是真正退出
+      window.streamget.window.close();
+      return;
+    }
+    showToast('StreamGet 客户端已转入后台系统托盘静默运行（浏览器预览模式仅作提示）');
   };
 
   return (
-    <header className="h-12 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-3 flex items-center justify-between z-30 select-none relative">
+    <header
+      className="h-12 bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 px-3 flex items-center justify-between z-30 select-none relative app-drag"
+      onDoubleClick={(e) => {
+        if (!isElectron || !window.streamget) return;
+        const target = e.target as HTMLElement;
+        if (target.closest('button, input, textarea, select, a')) return;
+        window.streamget.window.maximize().then(setIsMaximized).catch(() => {});
+      }}
+    >
       {/* Toast Notification Banner for Window / Theme feedback */}
       {toastMessage && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 px-4 py-2 bg-slate-900/95 text-cyan-300 border border-cyan-500/40 rounded-xl shadow-xl backdrop-blur-md text-xs font-medium flex items-center gap-2 z-50 animate-in fade-in slide-in-from-top-2">
@@ -125,7 +155,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       )}
 
       {/* Left: Brand Logo & Title */}
-      <div className="flex items-center gap-2.5">
+      <div className="flex items-center gap-2.5 app-no-drag">
         <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/20 shrink-0">
           <Layers className="w-4 h-4 text-white" />
         </div>
@@ -138,7 +168,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       </div>
 
       {/* Center: Quick Stream URL Input */}
-      <div className="flex-1 max-w-lg mx-4">
+      <div className="flex-1 max-w-lg mx-4 app-no-drag">
         <form onSubmit={handleQuickSubmit} className="relative">
           <input
             type="text"
@@ -159,7 +189,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       </div>
 
       {/* Right: Telemetry + Theme Switcher + Window Control Buttons */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 app-no-drag">
         {/* Speed Meter Badge */}
         <div
           onClick={() => setActiveTab('downloader')}
@@ -231,7 +261,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         <div className="h-5 w-px bg-slate-700/60 mx-1" />
 
         {/* Standard Desktop Window Control Buttons (Rightmost Position: Minimize, Maximize/Restore, Close) */}
-        <div className="flex items-center gap-1 -mr-1">
+        <div className="flex items-center gap-1 -mr-1 app-no-drag">
           {/* Minimize Button */}
           <button
             onClick={handleMinimize}

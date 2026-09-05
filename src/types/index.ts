@@ -238,6 +238,7 @@ export interface AppSettings {
   enableSoundAlerts: boolean;
   theme: 'dark' | 'light' | 'midnight' | 'cyber';
   autoStartOnBoot: boolean;
+  minimizeToTray?: boolean;
   showDanmakuOverlay: boolean;
   downloadPath?: string;
   defaultFormat?: 'mp4' | 'flv' | 'ts' | 'mkv';

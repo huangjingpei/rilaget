@@ -1,3 +1,4 @@
+import { inElectron, electronApi } from './electronBridge';
 import { logger } from './logger';
 
 export type SidecarQuality = {
@@ -53,7 +54,27 @@ function sidecarUnavailableMessage(cause: string): string {
   );
 }
 
+/**
+ * Electron：由主进程托管的 SidecarProcess（stdio JSON Lines）经 IPC 直达；
+ * 浏览器：走 Vite 代理到 sidecar-server.mjs 的 HTTP 接口。两种宿主共用同一返回值契约。
+ */
+
 export async function fetchSidecarStatus(): Promise<SidecarStatus> {
+  const api = electronApi();
+  if (inElectron() && api) {
+    try {
+      const body = await api.sidecar.status();
+      return { ok: true, running: Boolean(body.running), pong: body.pong ?? null, python: body.python, bridge: body.bridge, startedAt: body.startedAt };
+    } catch (err: any) {
+      return {
+        ok: false,
+        running: false,
+        pong: null,
+        error: sidecarUnavailableMessage(err?.message || 'IPC 调用失败'),
+      };
+    }
+  }
+
   try {
     const res = await fetch('/api/status');
     const body = await readJson(res);
@@ -72,6 +93,15 @@ export async function fetchSidecarStatus(): Promise<SidecarStatus> {
 }
 
 export async function fetchSidecarPlatforms(): Promise<SidecarPlatform[]> {
+  const api = electronApi();
+  if (inElectron() && api) {
+    try {
+      return (await api.sidecar.platforms()) as unknown as SidecarPlatform[];
+    } catch (err: any) {
+      throw new Error(sidecarUnavailableMessage(err?.message || 'IPC 调用失败'));
+    }
+  }
+
   const res = await fetch('/api/platforms');
   const body = await readJson(res);
   if (!res.ok || !body.ok) {
@@ -85,6 +115,22 @@ export async function parseViaSidecar(params: {
   cookies?: string | null;
   proxy?: string | null;
 }): Promise<SidecarParseData> {
+  const api = electronApi();
+  if (inElectron() && api) {
+    try {
+      const data = await api.sidecar.parse({
+        url: params.url,
+        cookies: params.cookies || null,
+        proxy: params.proxy || null,
+      });
+      return data as unknown as SidecarParseData;
+    } catch (err: any) {
+      // Electron IPC 错误消息形如 "Error invoking remote method 'sidecar:parse': <原因>"
+      const msg = String(err?.message || '解析失败');
+      throw new Error(msg.replace(/^Error invoking remote method '[^']+':\s*/, ''));
+    }
+  }
+
   let res: Response;
   try {
     res = await fetch('/api/parse', {
@@ -114,6 +160,27 @@ export async function parseViaSidecar(params: {
 let eventsStarted = false;
 
 export function connectSidecarEvents(): () => void {
+  const api = electronApi();
+
+  if (inElectron() && api) {
+    if (eventsStarted) return () => {};
+    eventsStarted = true;
+    const unsubscribe = api.sidecar.onLog(({ level, message }) => {
+      const safeLevel = (['info', 'warn', 'error', 'success', 'debug'] as LogLevel[]).includes(
+        level as LogLevel
+      )
+        ? (level as LogLevel)
+        : 'info';
+      if (message) {
+        logger.addLog(safeLevel, 'PARSER', `[sidecar] ${message}`);
+      }
+    });
+    return () => {
+      unsubscribe();
+      eventsStarted = false;
+    };
+  }
+
   if (eventsStarted || typeof EventSource === 'undefined') {
     return () => {};
   }

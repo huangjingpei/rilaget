@@ -2,34 +2,40 @@ import React, { useState, useEffect } from 'react';
 import {
   Settings,
   FolderOpen,
-  Sliders,
+  FolderSearch,
   Shield,
   Cpu,
-  Package,
-  Terminal,
+  HardDrive,
+  Palette,
   Copy,
   Check,
-  Download,
-  ExternalLink,
-  Code2,
-  HardDrive,
-  Radio,
-  FileCode,
   Sun,
   Moon,
-  Palette
+  Code2,
+  Power
 } from 'lucide-react';
 import { AppSettings } from '../../types';
 import { settingsService } from '../../services/settingsService';
 import { themeService, ThemeMode } from '../../services/themeService';
+import { inElectron } from '../../services/electronBridge';
+
+// 打包发布页内联展示真实工程文件（?raw 在构建时打包成文本，避免与磁盘文件脱节）
+import electronMainRaw from '../../../electron/main.cjs?raw';
+import electronPreloadRaw from '../../../electron/preload.cjs?raw';
+import sidecarProcessRaw from '../../../server/sidecar-process.mjs?raw';
+import sidecarServerRaw from '../../../server/sidecar-server.mjs?raw';
+import bridgePyRaw from '../../../sidecar/bridge.py?raw';
+import packageJsonRaw from '../../../package.json?raw';
 
 export const SettingsView: React.FC = () => {
   const [settings, setSettings] = useState<AppSettings>(settingsService.getSettings());
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(themeService.getTheme());
   const [activeTab, setActiveTab] = useState<'general' | 'appearance' | 'package'>('general');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [activePackageTab, setActivePackageTab] = useState<'electron' | 'tauri' | 'scripts'>('electron');
+  const [activePackageTab, setActivePackageTab] = useState<string>('main');
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [autoStart, setAutoStart] = useState(false);
+  const isElectron = inElectron();
 
   useEffect(() => {
     const unsub = settingsService.subscribe((s) => {
@@ -38,6 +44,7 @@ export const SettingsView: React.FC = () => {
     const unsubTheme = themeService.subscribe((t) => {
       setCurrentTheme(t);
     });
+    settingsService.getAutoStart().then((v) => setAutoStart(Boolean(v)));
     return () => {
       unsub();
       unsubTheme();
@@ -62,24 +69,30 @@ export const SettingsView: React.FC = () => {
     setTimeout(() => setCopiedKey(null), 2000);
   };
 
-  const packageFiles = settingsService.getElectronPackagingCode();
-  const electronMainCode = packageFiles[0].code;
-  const tauriConfCode = packageFiles[1].code;
+  const handlePickDirectory = async () => {
+    const dir = await settingsService.pickDownloadDirectory();
+    if (dir) {
+      setSavedSuccess(true);
+      setTimeout(() => setSavedSuccess(false), 2000);
+    }
+  };
 
-  const packageJsonScripts = `{
-  "name": "rilaget-desktop",
-  "version": "1.0.0",
-  "main": "electron/main.cjs",
-  "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "electron:dev": "concurrently \\"vite\\" \\"wait-on http://localhost:3000 && electron .\\"",
-    "electron:build:win": "vite build && electron-builder --win --x64",
-    "electron:build:mac": "vite build && electron-builder --mac",
-    "tauri:dev": "cargo tauri dev",
-    "tauri:build": "cargo tauri build"
-  }
-}`;
+  const handleToggleAutoStart = async (enabled: boolean) => {
+    const applied = await settingsService.setAutoStart(enabled);
+    setAutoStart(applied);
+    setSavedSuccess(true);
+    setTimeout(() => setSavedSuccess(false), 2000);
+  };
+
+  const sourceFiles: { id: string; label: string; file: string; code: string }[] = [
+    { id: 'main', label: 'Electron 主进程', file: 'electron/main.cjs', code: electronMainRaw },
+    { id: 'preload', label: 'Electron Preload', file: 'electron/preload.cjs', code: electronPreloadRaw },
+    { id: 'process', label: 'Sidecar 进程宿主', file: 'server/sidecar-process.mjs', code: sidecarProcessRaw },
+    { id: 'server', label: 'Sidecar HTTP (开发)', file: 'server/sidecar-server.mjs', code: sidecarServerRaw },
+    { id: 'bridge', label: 'Python Sidecar 桥', file: 'sidecar/bridge.py', code: bridgePyRaw },
+    { id: 'pkg', label: 'package.json', file: 'package.json', code: packageJsonRaw },
+  ];
+  const activeFile = sourceFiles.find((f) => f.id === activePackageTab) || sourceFiles[0];
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-4 space-y-3">
@@ -145,12 +158,40 @@ export const SettingsView: React.FC = () => {
                 <div className="space-y-2 text-xs">
                   <div>
                     <label className="text-[11px] text-slate-400">录制文件存放目录</label>
-                    <input
-                      type="text"
-                      value={settings.downloadPath}
-                      onChange={(e) => handleUpdate({ downloadPath: e.target.value })}
-                      className="w-full h-8 mt-1 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 font-mono text-[11px] focus:outline-none"
-                    />
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <input
+                        type="text"
+                        value={settings.downloadPath}
+                        onChange={(e) =>
+                          handleUpdate({ downloadPath: e.target.value, downloadDir: e.target.value })
+                        }
+                        className="flex-1 h-8 px-2.5 bg-slate-950 border border-slate-800 rounded-lg text-slate-200 font-mono text-[11px] focus:outline-none min-w-0"
+                      />
+                      {isElectron ? (
+                        <>
+                          <button
+                            onClick={handlePickDirectory}
+                            title="弹出系统目录选择器"
+                            className="h-8 px-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-[11px] font-medium flex items-center gap-1 shrink-0"
+                          >
+                            <FolderSearch className="w-3.5 h-3.5" />
+                            选择
+                          </button>
+                          <button
+                            onClick={() => settingsService.openDownloadsFolder()}
+                            title="在资源管理器中打开该目录"
+                            className="h-8 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium flex items-center gap-1 border border-slate-700 shrink-0"
+                          >
+                            <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                            打开
+                          </button>
+                        </>
+                      ) : (
+                        <span className="text-[10px] text-slate-500 font-mono shrink-0" title="Electron 桌面壳内可弹系统目录选择器">
+                          浏览器模式
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div>
@@ -214,7 +255,21 @@ export const SettingsView: React.FC = () => {
                       <div className="text-slate-200 font-semibold">开播轮询扫描间隔</div>
                       <div className="text-[10px] text-slate-400">后台自动检测主播上线频率</div>
                     </div>
-                    <span className="font-mono text-cyan-400 font-bold">{settings.monitorCheckIntervalSeconds} 秒</span>
+                    <select
+                      value={settings.monitorCheckIntervalSeconds}
+                      onChange={(e) =>
+                        handleUpdate({
+                          monitorCheckIntervalSeconds: Number(e.target.value),
+                          livePollingIntervalSeconds: Number(e.target.value),
+                        })
+                      }
+                      className="h-7 px-1.5 bg-slate-900 border border-slate-700 rounded-md text-slate-200 font-mono text-xs focus:outline-none"
+                    >
+                      <option value={15}>15 秒</option>
+                      <option value={30}>30 秒</option>
+                      <option value={60}>60 秒</option>
+                      <option value={120}>120 秒</option>
+                    </select>
                   </div>
 
                   <div className="flex items-center justify-between p-2 rounded-lg bg-slate-950 border border-slate-800">
@@ -222,7 +277,22 @@ export const SettingsView: React.FC = () => {
                       <div className="text-slate-200 font-semibold">最大同时录制并发任务数</div>
                       <div className="text-[10px] text-slate-400">防止占用过高带宽与CPU</div>
                     </div>
-                    <span className="font-mono text-cyan-400 font-bold">{settings.maxConcurrentDownloads} 路并发</span>
+                    <select
+                      value={settings.maxConcurrentDownloads}
+                      onChange={(e) =>
+                        handleUpdate({
+                          maxConcurrentDownloads: Number(e.target.value),
+                          concurrentDownloads: Number(e.target.value),
+                        })
+                      }
+                      className="h-7 px-1.5 bg-slate-900 border border-slate-700 rounded-md text-slate-200 font-mono text-xs focus:outline-none"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 8].map((n) => (
+                        <option key={n} value={n}>
+                          {n} 路并发
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               </div>
@@ -292,16 +362,41 @@ export const SettingsView: React.FC = () => {
                       <div className="text-slate-200 font-semibold">关闭窗口时最小化至托盘</div>
                       <div className="text-[10px] text-slate-400">保持后台持续录制，不中断任务</div>
                     </div>
-                    <span className="text-emerald-400 font-bold text-xs">已启用</span>
+                    <input
+                      type="checkbox"
+                      checked={settings.minimizeToTray !== false}
+                      onChange={(e) => handleUpdate({ minimizeToTray: e.target.checked })}
+                      className="w-4 h-4 rounded text-cyan-500"
+                      title="关闭窗口时隐藏到托盘，而非退出应用"
+                    />
                   </div>
 
                   <div className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center justify-between">
                     <div>
                       <div className="text-slate-200 font-semibold">开机自动启动后台监控</div>
-                      <div className="text-[10px] text-slate-400">Windows/macOS 自启录制守护</div>
+                      <div className="text-[10px] text-slate-400">
+                        {isElectron
+                          ? '通过系统登录项注册，随系统启动静默常驻'
+                          : '浏览器模式下仅保存偏好，Electron 壳内生效'}
+                      </div>
                     </div>
-                    <span className="text-cyan-400 font-bold text-xs">开机静默常驻</span>
+                    <input
+                      type="checkbox"
+                      checked={autoStart}
+                      onChange={(e) => handleToggleAutoStart(e.target.checked)}
+                      className="w-4 h-4 rounded text-cyan-500"
+                      title="开机自动启动 StreamGet"
+                    />
                   </div>
+
+                  {isElectron && (
+                    <div className="p-2 rounded-lg bg-slate-950/80 border border-slate-800 flex items-center gap-2 text-[10px] text-slate-500">
+                      <Power className="w-3 h-3 text-emerald-400 shrink-0" />
+                      <span>
+                        托盘菜单支持“显示主窗口 / 退出”；退出托盘项会真正结束进程并停止 sidecar。
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -314,54 +409,40 @@ export const SettingsView: React.FC = () => {
 
         {activeTab === 'package' && (
           <div className="h-full flex flex-col rounded-xl bg-slate-900/90 border border-slate-800 overflow-hidden">
-            <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0">
-              <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg text-xs">
-                <button
-                  onClick={() => setActivePackageTab('electron')}
-                  className={`px-2.5 py-1 rounded ${activePackageTab === 'electron' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}
-                >
-                  Electron 主进程
-                </button>
-                <button
-                  onClick={() => setActivePackageTab('tauri')}
-                  className={`px-2.5 py-1 rounded ${activePackageTab === 'tauri' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}
-                >
-                  Tauri 配置 (Rust)
-                </button>
-                <button
-                  onClick={() => setActivePackageTab('scripts')}
-                  className={`px-2.5 py-1 rounded ${activePackageTab === 'scripts' ? 'bg-cyan-600 text-white' : 'text-slate-400'}`}
-                >
-                  package.json 脚本
-                </button>
+            <div className="p-2.5 bg-slate-950 border-b border-slate-800 flex items-center justify-between shrink-0 gap-2">
+              <div className="flex items-center gap-1 bg-slate-900 p-0.5 rounded-lg text-xs overflow-x-auto">
+                {sourceFiles.map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setActivePackageTab(f.id)}
+                    className={`px-2.5 py-1 rounded whitespace-nowrap transition-colors ${
+                      activePackageTab === f.id ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
               </div>
 
-              <button
-                onClick={() =>
-                  handleCopy(
-                    'pkg',
-                    activePackageTab === 'electron'
-                      ? electronMainCode
-                      : activePackageTab === 'tauri'
-                      ? tauriConfCode
-                      : packageJsonScripts
-                  )
-                }
-                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1 border border-slate-700"
-              >
-                {copiedKey === 'pkg' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                <span>复制当前代码</span>
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[10px] font-mono text-slate-500 hidden md:inline">{activeFile.file}</span>
+                <button
+                  onClick={() => handleCopy('pkg', activeFile.code)}
+                  className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs flex items-center gap-1 border border-slate-700"
+                >
+                  {copiedKey === 'pkg' ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>复制文件内容</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="px-2.5 pb-1.5 pt-1.5 bg-slate-950 border-b border-slate-800 text-[10px] text-slate-500 flex items-center gap-1.5 shrink-0">
+              <Code2 className="w-3 h-3 text-cyan-500" />
+              <span>已随工程落盘的真实文件（?raw 内联展示，与磁盘内容一致）</span>
             </div>
 
             <div className="flex-1 p-3 bg-slate-950 font-mono text-[11px] text-slate-300 overflow-y-auto select-text">
-              <pre className="whitespace-pre">
-                {activePackageTab === 'electron'
-                  ? electronMainCode
-                  : activePackageTab === 'tauri'
-                  ? tauriConfCode
-                  : packageJsonScripts}
-              </pre>
+              <pre className="whitespace-pre">{activeFile.code}</pre>
             </div>
           </div>
         )}

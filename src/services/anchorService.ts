@@ -1,5 +1,6 @@
 import { MonitoredAnchor, PlatformId } from '../types';
 import { logger } from './logger';
+import { loadStore, makePersister } from './persistence';
 
 type AnchorListener = (anchors: MonitoredAnchor[]) => void;
 
@@ -7,10 +8,21 @@ class AnchorService {
   private anchors: MonitoredAnchor[] = [];
   private listeners: Set<AnchorListener> = new Set();
   private timer: any = null;
+  private hasLocalChanges = false;
+  private persister = makePersister('anchors', () => this.anchors, 800);
 
   constructor() {
     this.initDefaultAnchors();
+    void this.hydrate();
     this.startPolling();
+  }
+
+  private async hydrate() {
+    const stored = await loadStore<MonitoredAnchor[]>('anchors');
+    if (this.hasLocalChanges || !Array.isArray(stored)) return;
+    this.anchors = stored;
+    logger.addLog('info', 'MONITOR', `已从本地存储恢复 ${this.anchors.length} 位关注主播`);
+    this.notify();
   }
 
   private initDefaultAnchors() {
@@ -135,6 +147,7 @@ class AnchorService {
   }
 
   public addAnchor(data: Partial<MonitoredAnchor> & { url: string; name: string; platform: PlatformId }): MonitoredAnchor {
+    this.hasLocalChanges = true;
     const newAnchor: MonitoredAnchor = {
       id: 'anc_' + Math.random().toString(36).substring(2, 9),
       platform: data.platform,
@@ -159,11 +172,13 @@ class AnchorService {
 
     this.anchors = [newAnchor, ...this.anchors];
     logger.addLog('info', 'MONITOR', `新增关注主播: [${newAnchor.platform.toUpperCase()}] ${newAnchor.name} (自动录制: ${newAnchor.autoRecord ? '开启' : '关闭'})`);
+    this.persister.schedule();
     this.notify();
     return newAnchor;
   }
 
   public toggleAutoRecord(id: string) {
+    this.hasLocalChanges = true;
     this.anchors = this.anchors.map((a) => {
       if (a.id === id) {
         const next = !a.autoRecord;
@@ -172,10 +187,12 @@ class AnchorService {
       }
       return a;
     });
+    this.persister.schedule();
     this.notify();
   }
 
   public toggleLiveStatus(id: string) {
+    this.hasLocalChanges = true;
     this.anchors = this.anchors.map((a) => {
       if (a.id === id) {
         const nextLive = !a.isLive;
@@ -193,15 +210,18 @@ class AnchorService {
       }
       return a;
     });
+    this.persister.schedule();
     this.notify();
   }
 
   public deleteAnchor(id: string) {
+    this.hasLocalChanges = true;
     const anchor = this.anchors.find((a) => a.id === id);
     if (anchor) {
       logger.addLog('info', 'MONITOR', `取消关注主播: ${anchor.name}`);
     }
     this.anchors = this.anchors.filter((a) => a.id !== id);
+    this.persister.schedule();
     this.notify();
   }
 

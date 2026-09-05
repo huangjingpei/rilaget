@@ -1,5 +1,6 @@
 import { DownloadStatus, DownloadTask, ParsedStreamResult, StreamQuality } from '../types';
 import { logger } from './logger';
+import { loadStore, makePersister } from './persistence';
 import confetti from 'canvas-confetti';
 
 type TaskListener = (tasks: DownloadTask[]) => void;
@@ -8,14 +9,32 @@ class DownloadEngine {
   private tasks: DownloadTask[] = [];
   private listeners: Set<TaskListener> = new Set();
   private intervalId: any = null;
+  private hasLocalChanges = false;
+  private persister = makePersister('tasks', () => this.tasks, 800);
 
   constructor() {
     this.initInitialTasks();
+    void this.hydrate();
     this.startLoop();
   }
 
+  /** 从主进程 store / localStorage 回灌任务列表（磁盘数据优先于演示种子） */
+  private async hydrate() {
+    const stored = await loadStore<DownloadTask[]>('tasks');
+    if (this.hasLocalChanges || !Array.isArray(stored)) return;
+    // 重启后不延续“录制中/下载中”状态——真实 FFmpeg 引擎落地前一律置为暂停
+    this.tasks = stored.map((t) => {
+      if (t.status === 'recording' || t.status === 'downloading') {
+        return { ...t, status: 'paused' as DownloadStatus, speedBytesPerSec: 0 };
+      }
+      return t;
+    });
+    logger.addLog('info', 'DOWNLOADER', `已从本地存储恢复 ${this.tasks.length} 条任务记录`);
+    this.notify();
+  }
+
   private initInitialTasks() {
-    // Seed with realistic demo active & completed tasks so UI is vibrant right away
+    // 开发原型保留少量演示任务；已有持久化记录时 hydrate() 会覆盖它们。
     const now = Date.now();
     this.tasks = [
       {
@@ -124,6 +143,7 @@ class DownloadEngine {
   private startLoop() {
     this.intervalId = setInterval(() => {
       let changed = false;
+      const beforeStatus = new Map(this.tasks.map((t) => [t.id, t.status]));
 
       this.tasks = this.tasks.map((task) => {
         if (task.status === 'recording' || task.status === 'downloading') {
@@ -194,12 +214,17 @@ class DownloadEngine {
       });
 
       if (changed) {
+        const statusChanged = this.tasks.some((t) => beforeStatus.get(t.id) !== t.status);
+        if (statusChanged) {
+          this.persister.schedule();
+        }
         this.notify();
       }
     }, 1000);
   }
 
   public addTask(parsed: ParsedStreamResult, quality: StreamQuality): DownloadTask {
+    this.hasLocalChanges = true;
     const isLive = parsed.isLive;
     const initialTotal = isLive ? 1024 * 1024 * 800 : 1024 * 1024 * 350;
     const cleanTitle = parsed.title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 30);
@@ -239,11 +264,13 @@ class DownloadEngine {
       'DOWNLOADER',
       `创建并启动下载任务: [${parsed.platformName}] ${parsed.anchorName} - ${quality.name}`
     );
+    this.persister.schedule();
     this.notify();
     return newTask;
   }
 
   public pauseTask(id: string) {
+    this.hasLocalChanges = true;
     this.tasks = this.tasks.map((t) => {
       if (t.id === id) {
         logger.addLog('warn', 'DOWNLOADER', `暂停下载任务: ${t.title}`);
@@ -251,10 +278,12 @@ class DownloadEngine {
       }
       return t;
     });
+    this.persister.schedule();
     this.notify();
   }
 
   public resumeTask(id: string) {
+    this.hasLocalChanges = true;
     this.tasks = this.tasks.map((t) => {
       if (t.id === id) {
         logger.addLog('info', 'DOWNLOADER', `恢复下载任务: ${t.title}`);
@@ -266,10 +295,12 @@ class DownloadEngine {
       }
       return t;
     });
+    this.persister.schedule();
     this.notify();
   }
 
   public stopAndFinishTask(id: string) {
+    this.hasLocalChanges = true;
     this.tasks = this.tasks.map((t) => {
       if (t.id === id) {
         logger.addLog('success', 'DOWNLOADER', `手动保存并停止录制: ${t.title}`);
@@ -284,6 +315,7 @@ class DownloadEngine {
       }
       return t;
     });
+    this.persister.schedule();
     this.notify();
   }
 
@@ -299,11 +331,13 @@ class DownloadEngine {
   }
 
   public deleteTask(id: string) {
+    this.hasLocalChanges = true;
     const task = this.tasks.find((t) => t.id === id);
     if (task) {
       logger.addLog('info', 'DOWNLOADER', `移除下载任务: ${task.title}`);
     }
     this.tasks = this.tasks.filter((t) => t.id !== id);
+    this.persister.schedule();
     this.notify();
   }
 
@@ -312,9 +346,11 @@ class DownloadEngine {
   }
 
   public clearCompleted() {
+    this.hasLocalChanges = true;
     const count = this.tasks.filter((t) => t.status === 'completed').length;
     this.tasks = this.tasks.filter((t) => t.status !== 'completed');
     logger.addLog('info', 'DOWNLOADER', `清理了 ${count} 个已完成任务`);
+    this.persister.schedule();
     this.notify();
   }
 
