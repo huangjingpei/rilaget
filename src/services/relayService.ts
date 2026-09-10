@@ -12,7 +12,7 @@ class RelayService {
     this.currentTask = {
       id: 'relay_single_task',
       name: '多平台流媒体转播任务',
-      relayMode: 'mediamtx',
+      relayMode: 'potplayer',
       sourceUrl: 'https://live.douyin.com/80017709309',
       sourcePlatform: 'douyin',
       anchorName: '东方甄选直播间',
@@ -21,16 +21,16 @@ class RelayService {
           id: 'dst_1',
           name: 'MediaMTX 本地流服务器',
           protocol: 'mediamtx',
-          targetUrl: 'rtmp://127.0.0.1:1935/live/rilaget_relay',
+          targetUrl: 'rtmp://127.0.0.1:1935/live/streamget_relay',
           streamKey: '',
           enabled: true,
         },
         {
           id: 'dst_2',
-          name: 'B站第三方直播推流',
+          name: '第三方直播推流',
           protocol: 'rtmp',
           targetUrl: 'rtmp://live-push.bilivideo.com/live-bvc/',
-          streamKey: '?streamname=live_xxx&key=yyy',
+          streamKey: '',
           enabled: false,
         }
       ],
@@ -41,39 +41,41 @@ class RelayService {
         borderless: true,
         hideControlsOnIdle: true,
         hardwareDecoding: true,
-        customPotPlayerPath: 'C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe',
+        customPotPlayerPath: 'PotPlayerMini64.exe',
         autoTopmost: true,
         targetLiveCompanion: 'douyin_companion',
       },
-      status: 'running',
-      currentFps: 60,
-      currentBitrateKbps: 4500,
-      uptimeSeconds: 120,
+      status: 'stopped',
+      currentFps: 0,
+      currentBitrateKbps: 0,
+      uptimeSeconds: 0,
       audioCodec: 'copy',
       videoCodec: 'copy',
-      localPlaybackM3U8: 'http://127.0.0.1:8888/live/rilaget_relay/index.m3u8',
-      localPlaybackWebRTC: 'http://127.0.0.1:8889/live/rilaget_relay',
-      totalTransferredBytes: 1024 * 1024 * 65,
+      localPlaybackM3U8: 'http://127.0.0.1:8888/live/streamget_relay/index.m3u8',
+      localPlaybackWebRTC: 'http://127.0.0.1:8889/live/streamget_relay',
+      totalTransferredBytes: 0,
       droppedFrames: 0,
     };
-
-    this.startStatsLoop();
   }
 
-  private startStatsLoop() {
+  private startUptimeTimer() {
+    if (this.statsTimer) clearInterval(this.statsTimer);
     this.statsTimer = setInterval(() => {
       if (this.currentTask.status === 'running') {
-        const jitter = (Math.random() - 0.49) * 120;
         this.currentTask = {
           ...this.currentTask,
-          uptimeSeconds: this.currentTask.uptimeSeconds + 2,
-          currentBitrateKbps: Math.max(3200, Math.min(6500, Math.floor(this.currentTask.currentBitrateKbps + jitter))),
-          currentFps: Math.random() > 0.1 ? 60 : 59,
-          totalTransferredBytes: this.currentTask.totalTransferredBytes + (1024 * 1024 * 0.6),
+          uptimeSeconds: this.currentTask.uptimeSeconds + 1,
         };
         this.notify();
       }
-    }, 2000);
+    }, 1000);
+  }
+
+  private stopUptimeTimer() {
+    if (this.statsTimer) {
+      clearInterval(this.statsTimer);
+      this.statsTimer = null;
+    }
   }
 
   public getTask(): RelayTask {
@@ -112,8 +114,14 @@ class RelayService {
     this.currentTask = {
       ...this.currentTask,
       status: nextStatus,
-      uptimeSeconds: nextStatus === 'running' ? 0 : this.currentTask.uptimeSeconds,
+      uptimeSeconds: 0,
     };
+
+    if (nextStatus === 'running') {
+      this.startUptimeTimer();
+    } else {
+      this.stopUptimeTimer();
+    }
 
     logger.addLog(
       nextStatus === 'running' ? 'success' : 'warn',

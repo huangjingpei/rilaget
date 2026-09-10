@@ -26,6 +26,8 @@ import {
 } from 'lucide-react';
 import { RelayTask, PotPlayerConfig } from '../../types';
 import { relayService } from '../../services/relayService';
+import mpegts from 'mpegts.js';
+import Hls from 'hls.js';
 
 interface PotPlayerCaptureWindowProps {
   task: RelayTask;
@@ -45,10 +47,107 @@ export const PotPlayerCaptureWindow: React.FC<PotPlayerCaptureWindowProps> = ({
   const [showCliModal, setShowCliModal] = useState(false);
   const [pipActive, setPipActive] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mpegtsRef = useRef<mpegts.Player | null>(null);
+  const hlsRef = useRef<Hls | null>(null);
 
   useEffect(() => {
     setConfig(task.potplayerConfig);
   }, [task]);
+
+  // ESC 键退出纯净模式或关闭视窗
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isCleanMode) {
+          setIsCleanMode(false);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isCleanMode, onClose]);
+
+  // 绑定真实流播放（FLV / HLS / 原生）
+  useEffect(() => {
+    const video = videoRef.current;
+    const url = task.sourceUrl;
+    if (!video || !url) return;
+
+    const lower = url.toLowerCase();
+    const isFlv = lower.includes('.flv') || lower.includes('format=flv');
+    const isM3u8 = lower.includes('.m3u8') || lower.includes('format=m3u8') || lower.includes('/hls');
+
+    const cleanUp = () => {
+      if (mpegtsRef.current) {
+        try {
+          mpegtsRef.current.pause();
+          mpegtsRef.current.unload();
+          mpegtsRef.current.detachMediaElement();
+          mpegtsRef.current.destroy();
+        } catch {}
+        mpegtsRef.current = null;
+      }
+      if (hlsRef.current) {
+        try {
+          hlsRef.current.destroy();
+        } catch {}
+        hlsRef.current = null;
+      }
+    };
+
+    cleanUp();
+
+    const safePlay = (el: { play: () => unknown }) => {
+      try {
+        const res = el.play();
+        if (res && typeof (res as Promise<void>).catch === 'function') {
+          (res as Promise<void>).catch(() => {});
+        }
+      } catch {}
+    };
+
+    if (isFlv && mpegts.isSupported()) {
+      try {
+        const player = mpegts.createPlayer(
+          {
+            type: 'flv',
+            isLive: true,
+            url,
+            hasAudio: true,
+            hasVideo: true,
+          },
+          {
+            enableWorker: true,
+            lazyLoad: false,
+            liveBufferLatencyChasing: true,
+          }
+        );
+        player.attachMediaElement(video);
+        player.load();
+        safePlay(player);
+        mpegtsRef.current = player;
+      } catch {}
+    } else if (isM3u8 && Hls.isSupported()) {
+      try {
+        const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+        hls.loadSource(url);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          safePlay(video);
+        });
+        hlsRef.current = hls;
+      } catch {}
+    } else if (url.startsWith('http')) {
+      video.src = url;
+      safePlay(video);
+    }
+
+    return () => {
+      cleanUp();
+    };
+  }, [task.sourceUrl]);
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -69,9 +168,7 @@ export const PotPlayerCaptureWindow: React.FC<PotPlayerCaptureWindowProps> = ({
   };
 
   const handleOpenDetached = () => {
-    const streamUrl = task.sourceUrl.startsWith('http')
-      ? task.sourceUrl
-      : 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+    const streamUrl = task.sourceUrl.startsWith('http') ? task.sourceUrl : '';
     const win = window.open(
       '',
       config.windowTitle,
@@ -294,7 +391,6 @@ export const PotPlayerCaptureWindow: React.FC<PotPlayerCaptureWindowProps> = ({
           <div className={`relative bg-black flex items-center justify-center ${getAspectClass()}`}>
             <video
               ref={videoRef}
-              src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
               autoPlay
               loop
               muted={isMuted}

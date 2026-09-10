@@ -15,6 +15,9 @@ import {
 } from 'lucide-react';
 import { logger } from '../../services/logger';
 
+import mpegts from 'mpegts.js';
+import Hls from 'hls.js';
+
 interface VideoPlayerModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -31,46 +34,129 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   isLive = true,
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const mpegtsPlayerRef = useRef<mpegts.Player | null>(null);
+  const hlsPlayerRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
-  const [showDanmaku, setShowDanmaku] = useState(true);
+  const [showDanmaku, setShowDanmaku] = useState(false);
   const [snapshotSuccess, setSnapshotSuccess] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [streamMeta, setStreamMeta] = useState<{
+    width: number;
+    height: number;
+    duration: number;
+    format: string;
+  }>({ width: 0, height: 0, duration: 0, format: '检测中...' });
   const [danmakuItems, setDanmakuItems] = useState<{ id: string; text: string; top: number; color: string }[]>([]);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !streamUrl) return;
 
-    // Danmaku spawner loop
-    const sampleTexts = [
-      '画质原画好清晰！',
-      'StreamGet 录制超丝滑 🔥',
-      '支持 40+ 多平台直链提取',
-      '6666666 太强了',
-      '内嵌播放器延迟低于 1 秒',
-      '已经加入自动录制队列 🚀',
-      'MediaMTX 转发推流正常',
-      '点赞 👍 关注主播'
-    ];
-    const colors = ['#ffffff', '#38bdf8', '#fbbf24', '#4ade80', '#f43f5e', '#a855f7'];
+    setLoadError(null);
+    const video = videoRef.current;
+    if (!video) return;
 
-    const interval = setInterval(() => {
-      if (!showDanmaku) return;
-      const text = sampleTexts[Math.floor(Math.random() * sampleTexts.length)];
-      const color = colors[Math.floor(Math.random() * colors.length)];
-      const top = Math.floor(10 + Math.random() * 70);
-      const newItem = {
-        id: Math.random().toString(),
-        text,
-        top,
-        color,
-      };
-      setDanmakuItems((prev) => [...prev.slice(-12), newItem]);
-    }, 1400);
+    const lower = streamUrl.toLowerCase();
+    const isFlv = lower.includes('.flv') || lower.includes('format=flv');
+    const isM3u8 = lower.includes('.m3u8') || lower.includes('format=m3u8') || lower.includes('/hls');
 
-    return () => clearInterval(interval);
-  }, [isOpen, showDanmaku]);
+    const destroyCurrent = () => {
+      if (mpegtsPlayerRef.current) {
+        try {
+          mpegtsPlayerRef.current.pause();
+          mpegtsPlayerRef.current.unload();
+          mpegtsPlayerRef.current.detachMediaElement();
+          mpegtsPlayerRef.current.destroy();
+        } catch {}
+        mpegtsPlayerRef.current = null;
+      }
+      if (hlsPlayerRef.current) {
+        try {
+          hlsPlayerRef.current.destroy();
+        } catch {}
+        hlsPlayerRef.current = null;
+      }
+    };
+
+    destroyCurrent();
+
+    const onLoadedMetadata = () => {
+      setStreamMeta({
+        width: video.videoWidth || 0,
+        height: video.videoHeight || 0,
+        duration: video.duration || 0,
+        format: isFlv ? 'FLV (mpegts.js)' : isM3u8 ? 'HLS (hls.js)' : 'MP4 / 容器直链',
+      });
+    };
+    video.addEventListener('loadedmetadata', onLoadedMetadata);
+
+    const safePlay = (el: { play: () => unknown }) => {
+      try {
+        const res = el.play();
+        if (res && typeof (res as Promise<void>).catch === 'function') {
+          (res as Promise<void>).catch(() => {});
+        }
+      } catch {}
+    };
+
+    if (isFlv && mpegts.isSupported()) {
+      try {
+        const player = mpegts.createPlayer(
+          {
+            type: 'flv',
+            isLive: isLive,
+            url: streamUrl,
+            hasAudio: true,
+            hasVideo: true,
+          },
+          {
+            enableWorker: true,
+            lazyLoad: false,
+            liveBufferLatencyChasing: true,
+          }
+        );
+        player.attachMediaElement(video);
+        player.load();
+        safePlay(player);
+        mpegtsPlayerRef.current = player;
+        setStreamMeta((prev) => ({ ...prev, format: 'FLV (mpegts.js 硬解)' }));
+      } catch (err: any) {
+        setLoadError(`FLV 播放引擎启动失败: ${err?.message || err}`);
+      }
+    } else if (isM3u8 && Hls.isSupported()) {
+      try {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          safePlay(video);
+        });
+        hls.on(Hls.Events.ERROR, (_event, data) => {
+          if (data.fatal) {
+            setLoadError(`HLS 流加载异常: ${data.details}`);
+          }
+        });
+        hlsPlayerRef.current = hls;
+        setStreamMeta((prev) => ({ ...prev, format: 'HLS (hls.js 引擎)' }));
+      } catch (err: any) {
+        setLoadError(`HLS 播放引擎启动失败: ${err?.message || err}`);
+      }
+    } else {
+      video.src = streamUrl;
+      safePlay(video);
+      setStreamMeta((prev) => ({ ...prev, format: 'HTML5 原生解码' }));
+    }
+
+    return () => {
+      video.removeEventListener('loadedmetadata', onLoadedMetadata);
+      destroyCurrent();
+    };
+  }, [isOpen, streamUrl, isLive]);
 
   if (!isOpen) return null;
 
@@ -183,7 +269,6 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden group">
           <video
             ref={videoRef}
-            src={streamUrl}
             autoPlay
             loop
             playsInline
@@ -192,36 +277,46 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             onPause={() => setIsPlaying(false)}
           />
 
+          {/* Load Error Alert */}
+          {loadError && (
+            <div className="absolute top-4 right-4 p-3 rounded-xl bg-rose-950/90 border border-rose-600 text-rose-200 text-xs z-20 max-w-md shadow-xl">
+              <div className="font-bold mb-1">播放提示</div>
+              <div>{loadError}</div>
+            </div>
+          )}
+
           {/* Floating Danmaku Overlay */}
           {showDanmaku && (
             <div className="absolute inset-0 pointer-events-none overflow-hidden">
-              {danmakuItems.map((item) => (
-                <div
-                  key={item.id}
-                  style={{
-                    top: `${item.top}%`,
-                    color: item.color,
-                    animation: 'danmaku-move 7s linear forwards',
-                  }}
-                  className="absolute right-0 text-sm font-semibold drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] whitespace-nowrap"
-                >
-                  {item.text}
-                </div>
-              ))}
+              {danmakuItems.length === 0 ? (
+                <div className="absolute top-2 right-4 text-xs text-slate-500 font-mono">弹幕监听就绪 (暂无弹幕)</div>
+              ) : (
+                danmakuItems.map((item) => (
+                  <div
+                    key={item.id}
+                    style={{
+                      top: `${item.top}%`,
+                      color: item.color,
+                      animation: 'danmaku-move 7s linear forwards',
+                    }}
+                    className="absolute right-0 text-sm font-semibold drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] whitespace-nowrap"
+                  >
+                    {item.text}
+                  </div>
+                ))
+              )}
             </div>
           )}
 
           {/* Stream Technical Inspector Overlay */}
           {showTechInfo && (
             <div className="absolute top-4 left-4 p-3 rounded-xl bg-black/85 backdrop-blur-md border border-cyan-500/30 text-[11px] font-mono text-cyan-300 space-y-1 z-20">
-              <div className="text-white font-bold pb-1 border-b border-slate-700">Stream Tech Inspector</div>
-              <div>分辨率: 1920 x 1080 (1080P60)</div>
-              <div>视频编码: H.264 / AVC (High Profile)</div>
-              <div>音频编码: AAC 48.0kHz Stereo (192kbps)</div>
-              <div>当前帧率: 59.94 FPS (Stable)</div>
-              <div>平均码率: 4,820 kbps</div>
-              <div>协议格式: HLS / FLV Chunk Stream</div>
-              <div>Buffer 缓冲: 4.2 秒 (极低延迟模式)</div>
+              <div className="text-white font-bold pb-1 border-b border-slate-700">实时流媒体技术参数</div>
+              <div>画面尺寸: {streamMeta.width > 0 ? `${streamMeta.width} x ${streamMeta.height}` : '正在检测画面元数据...'}</div>
+              <div>解封装引擎: {streamMeta.format}</div>
+              <div>模式: {isLive ? '🔴 直播流 (Live Stream)' : '📼 点播视频 (VOD)'}</div>
+              {streamMeta.duration > 0 && <div>视频总长: {Math.round(streamMeta.duration)} 秒</div>}
+              <div className="text-slate-400 truncate max-w-sm">直链协议: {streamUrl.split('?')[0]}</div>
             </div>
           )}
 

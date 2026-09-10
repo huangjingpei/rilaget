@@ -1,20 +1,44 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# StreamGet
 
-# Run and deploy your AI Studio app
+StreamGet 是一款面向专业创作者、直播运营人员和切片组的现代化跨平台直播流录制、解析下载及转播中继桌面客户端。
 
-This contains everything you need to run your app locally.
+## 核心技术栈
 
-View your app in AI Studio: https://ai.studio/apps/2d0212c3-48c9-4a6d-8365-20b3bee6954c
+- **前端 UI**: React 19 + TypeScript + Tailwind CSS + Lucide Icons + Motion
+- **桌面壳**: Electron 44 (contextIsolation, preload, tray, store)
+- **解析内核**: Python 3.12 + StreamGet Sidecar 桥进程（支持 26 个平台真实解析）
+- **播放引擎**: HLS.js + MPEGTS.js
 
-## Run Locally
+## 快速运行
 
-**Prerequisites:**  Node.js
+### 1. 安装依赖
 
+```bash
+npm install
+pip install -r sidecar/StreamGet/requirements.txt
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 2. 本地开发
+
+- **Electron 桌面端开发**（推荐）:
+  ```bash
+  npm run electron:dev
+  ```
+
+- **纯浏览器调试模式**（前端 + Sidecar HTTP 服务）:
+  ```bash
+  npm run dev:full
+  ```
+
+### 3. 构建与打包
+
+- **构建前端代码**:
+  ```bash
+  npm run build
+  ```
+
+- **打包为 Windows 安装包**:
+  ```bash
+  npm run electron:build
+  ```
+

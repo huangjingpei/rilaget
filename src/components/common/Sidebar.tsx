@@ -174,16 +174,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <p className="text-[11px] text-slate-400 leading-relaxed">
-            UI 走 Vite + React；真实拉流解析由本机 Python 边车完成。下载落盘仍为模拟，见后续 FFmpeg 引擎。
+            UI 基于 React 19；拉流解析由 Python 边车完成，内置 mpegts.js & hls.js 直播解码。
           </p>
-
-          <button
-            onClick={() => onOpenPlayer('https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4', 'StreamGet 直播画质测试流', true)}
-            className="w-full h-7 text-xs font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg flex items-center justify-center gap-1.5 transition-colors"
-          >
-            <Tv className="w-3.5 h-3.5 text-cyan-400" />
-            <span>开启流媒体试播窗口</span>
-          </button>
         </div>
       </div>
     </aside>

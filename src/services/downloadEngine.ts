@@ -1,6 +1,8 @@
 import { DownloadStatus, DownloadTask, ParsedStreamResult, StreamQuality } from '../types';
 import { logger } from './logger';
 import { loadStore, makePersister } from './persistence';
+import { settingsService } from './settingsService';
+import { electronApi, inElectron } from './electronBridge';
 import confetti from 'canvas-confetti';
 
 type TaskListener = (tasks: DownloadTask[]) => void;
@@ -8,229 +10,109 @@ type TaskListener = (tasks: DownloadTask[]) => void;
 class DownloadEngine {
   private tasks: DownloadTask[] = [];
   private listeners: Set<TaskListener> = new Set();
-  private intervalId: any = null;
   private hasLocalChanges = false;
   private persister = makePersister('tasks', () => this.tasks, 800);
 
   constructor() {
     this.initInitialTasks();
     void this.hydrate();
-    this.startLoop();
+    this.initRecorderBridge();
   }
 
-  /** 从主进程 store / localStorage 回灌任务列表（磁盘数据优先于演示种子） */
+  /** 从主进程 store / localStorage 回灌任务列表 */
   private async hydrate() {
     const stored = await loadStore<DownloadTask[]>('tasks');
     if (this.hasLocalChanges || !Array.isArray(stored)) return;
-    // 重启后不延续“录制中/下载中”状态——真实 FFmpeg 引擎落地前一律置为暂停
-    this.tasks = stored.map((t) => {
+    // 过滤掉历史残留的原型假任务
+    const realTasks = stored.filter(
+      (t) => !t.id.startsWith('task_douyin_01') && !t.id.startsWith('task_bilibili_02') && !t.id.startsWith('task_huya_03')
+    );
+    this.tasks = realTasks.map((t) => {
       if (t.status === 'recording' || t.status === 'downloading') {
         return { ...t, status: 'paused' as DownloadStatus, speedBytesPerSec: 0 };
       }
       return t;
     });
-    logger.addLog('info', 'DOWNLOADER', `已从本地存储恢复 ${this.tasks.length} 条任务记录`);
+    if (this.tasks.length > 0) {
+      logger.addLog('info', 'DOWNLOADER', `已从本地存储恢复 ${this.tasks.length} 条任务记录`);
+    }
     this.notify();
   }
 
   private initInitialTasks() {
-    // 开发原型保留少量演示任务；已有持久化记录时 hydrate() 会覆盖它们。
-    const now = Date.now();
-    this.tasks = [
-      {
-        id: 'task_douyin_01',
-        url: 'https://live.douyin.com/80017709309',
-        platform: 'douyin',
-        platformName: '抖音',
-        anchorName: '东方甄选直播间',
-        anchorAvatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        title: '【官方正品】全品类专场直播，点击右下角小黄车！',
-        coverUrl: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80',
-        isLiveStream: true,
-        quality: {
-          id: 'origin_4k',
-          name: '原画 (4K / 1080P60 极清)',
-          resolution: '3840x2160',
-          bitrate: '8500 kbps',
-          fps: 60,
-          format: 'flv',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        },
-        status: 'recording',
-        progress: 68,
-        downloadedBytes: 1024 * 1024 * 780, // 780MB
-        totalBytes: 1024 * 1024 * 1150, // 1.15GB
-        speedBytesPerSec: 1024 * 1024 * 4.2, // 4.2 MB/s
-        elapsedSeconds: 185,
-        etaSeconds: 88,
-        startTime: now - 185000,
-        filePath: 'C:/StreamGet/Downloads/抖音_东方甄选_20260831_162000.flv',
-        fileSizeFormatted: '780.0 MB / 1.15 GB',
-        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-        segmentDurationMinutes: 60,
-        segmentsCount: 1,
-      },
-      {
-        id: 'task_bilibili_02',
-        url: 'https://live.bilibili.com/5440',
-        platform: 'bilibili',
-        platformName: '哔哩哔哩',
-        anchorName: '虚拟偶像Official',
-        anchorAvatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-        title: '【新歌歌回】周一晚间电台互动&全新原创曲首播！',
-        coverUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
-        isLiveStream: true,
-        quality: {
-          id: 'hd_1080p',
-          name: '超清 (1080P 高码率)',
-          resolution: '1920x1080',
-          bitrate: '4500 kbps',
-          fps: 60,
-          format: 'flv',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        },
-        status: 'completed',
-        progress: 100,
-        downloadedBytes: 1024 * 1024 * 1420,
-        totalBytes: 1024 * 1024 * 1420,
-        speedBytesPerSec: 0,
-        elapsedSeconds: 340,
-        etaSeconds: 0,
-        startTime: now - 3600000,
-        endTime: now - 3260000,
-        filePath: 'C:/StreamGet/Downloads/B站_虚拟偶像Official_歌回录播.mp4',
-        fileSizeFormatted: '1.42 GB',
-        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4',
-        segmentDurationMinutes: 60,
-        segmentsCount: 1,
-      },
-      {
-        id: 'task_huya_03',
-        url: 'https://www.huya.com/99999',
-        platform: 'huya',
-        platformName: '虎牙直播',
-        anchorName: 'LPL官方赛事直播',
-        anchorAvatar: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=150&auto=format&fit=crop&q=80',
-        title: '【2026职业联赛】春季常规赛第一轮淘汰焦点对决',
-        coverUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
-        isLiveStream: true,
-        quality: {
-          id: 'origin_4k',
-          name: '原画 (4K / 1080P60 极清)',
-          resolution: '3840x2160',
-          bitrate: '8500 kbps',
-          fps: 60,
-          format: 'flv',
-          url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        },
-        status: 'recording',
-        progress: 34,
-        downloadedBytes: 1024 * 1024 * 310,
-        totalBytes: 1024 * 1024 * 910,
-        speedBytesPerSec: 1024 * 1024 * 6.8, // 6.8 MB/s
-        elapsedSeconds: 45,
-        etaSeconds: 88,
-        startTime: now - 45000,
-        filePath: 'C:/StreamGet/Downloads/虎牙_LPL官方赛事_20260831.flv',
-        fileSizeFormatted: '310.0 MB / 910 MB',
-        streamUrl: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4',
-        segmentDurationMinutes: 30,
-        segmentsCount: 1,
-      }
-    ];
+    this.tasks = [];
   }
 
-  private startLoop() {
-    this.intervalId = setInterval(() => {
-      let changed = false;
-      const beforeStatus = new Map(this.tasks.map((t) => [t.id, t.status]));
-
-      this.tasks = this.tasks.map((task) => {
-        if (task.status === 'recording' || task.status === 'downloading') {
-          changed = true;
-          // Fluctuate speed realistically
-          const speedVariance = (Math.random() - 0.5) * 1024 * 512;
-          const currentSpeed = Math.max(1024 * 800, task.speedBytesPerSec + speedVariance);
-          const addedBytes = currentSpeed;
-          const newDownloaded = task.downloadedBytes + addedBytes;
-          const newElapsed = task.elapsedSeconds + 1;
-
-          if (task.isLiveStream) {
-            // Live streams keep growing
-            const newTotal = Math.max(newDownloaded + 1024 * 1024 * 400, task.totalBytes);
-            const progress = Math.min(99, Math.floor((newDownloaded / newTotal) * 100));
-
-            return {
-              ...task,
-              downloadedBytes: newDownloaded,
-              totalBytes: newTotal,
-              progress: progress,
-              speedBytesPerSec: currentSpeed,
-              elapsedSeconds: newElapsed,
-              etaSeconds: 120,
-              fileSizeFormatted: `${(newDownloaded / (1024 * 1024)).toFixed(1)} MB (录制中)`,
-            };
-          } else {
-            // VOD download completes at 100%
-            if (newDownloaded >= task.totalBytes) {
-              logger.addLog('success', 'DOWNLOADER', `任务 [${task.title}] 下载完成!`);
-              try {
-                confetti({
-                  particleCount: 50,
-                  spread: 60,
-                  origin: { y: 0.8 }
-                });
-              } catch (e) {}
-
-              return {
-                ...task,
-                status: 'completed' as DownloadStatus,
-                progress: 100,
-                downloadedBytes: task.totalBytes,
-                speedBytesPerSec: 0,
-                elapsedSeconds: newElapsed,
-                etaSeconds: 0,
-                endTime: Date.now(),
-                fileSizeFormatted: `${(task.totalBytes / (1024 * 1024)).toFixed(1)} MB`,
-              };
-            }
-
-            const progress = Math.floor((newDownloaded / task.totalBytes) * 100);
-            const remainingBytes = task.totalBytes - newDownloaded;
-            const eta = Math.ceil(remainingBytes / (currentSpeed || 1));
-
-            return {
-              ...task,
-              downloadedBytes: newDownloaded,
-              progress: progress,
-              speedBytesPerSec: currentSpeed,
-              elapsedSeconds: newElapsed,
-              etaSeconds: eta,
-              fileSizeFormatted: `${(newDownloaded / (1024 * 1024)).toFixed(1)} MB / ${(task.totalBytes / (1024 * 1024)).toFixed(1)} MB`,
-            };
-          }
-        }
-        return task;
+  /** 监听来自 Electron 主进程的真实文件写盘与下载速度事件 */
+  private initRecorderBridge() {
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.onProgress((data) => {
+        this.handleProgressUpdate(data);
       });
+    }
+  }
 
-      if (changed) {
-        const statusChanged = this.tasks.some((t) => beforeStatus.get(t.id) !== t.status);
-        if (statusChanged) {
-          this.persister.schedule();
-        }
-        this.notify();
+  private handleProgressUpdate(data: StreamRecorderProgressPayload) {
+    let changed = false;
+    this.tasks = this.tasks.map((task) => {
+      if (task.id !== data.taskId) return task;
+      changed = true;
+      const isLive = task.isLiveStream;
+      let progress = task.progress;
+      if (!isLive && data.totalBytes > 0) {
+        progress = Math.min(100, Math.floor((data.downloadedBytes / data.totalBytes) * 100));
+      } else if (isLive && data.status === 'completed') {
+        progress = 100;
       }
-    }, 1000);
+
+      const mb = (data.downloadedBytes / (1024 * 1024)).toFixed(1);
+      let fileSizeFormatted = `${mb} MB`;
+      if (isLive) {
+        fileSizeFormatted = data.status === 'completed' ? `${mb} MB (录制完成)` : `${mb} MB (录制中)`;
+      } else if (data.totalBytes > 0) {
+        const totalMb = (data.totalBytes / (1024 * 1024)).toFixed(1);
+        fileSizeFormatted = `${mb} MB / ${totalMb} MB`;
+      }
+
+      if (data.status === 'completed' && task.status !== 'completed') {
+        logger.addLog('success', 'DOWNLOADER', `任务 [${task.title}] 录制/下载完成!`);
+        try {
+          confetti({ particleCount: 50, spread: 60, origin: { y: 0.8 } });
+        } catch {}
+      } else if (data.status === 'failed' && task.status !== 'failed') {
+        logger.addLog('error', 'DOWNLOADER', `任务 [${task.title}] 录制失败: ${data.error || '网络异常'}`);
+      }
+
+      return {
+        ...task,
+        status: data.status as DownloadStatus,
+        downloadedBytes: data.downloadedBytes,
+        totalBytes: data.totalBytes || task.totalBytes,
+        speedBytesPerSec: data.speedBytesPerSec,
+        elapsedSeconds: data.elapsedSeconds,
+        progress,
+        fileSizeFormatted,
+        endTime: data.status === 'completed' ? Date.now() : task.endTime,
+      };
+    });
+
+    if (changed) {
+      this.persister.schedule();
+      this.notify();
+    }
   }
 
   public addTask(parsed: ParsedStreamResult, quality: StreamQuality): DownloadTask {
     this.hasLocalChanges = true;
     const isLive = parsed.isLive;
-    const initialTotal = isLive ? 1024 * 1024 * 800 : 1024 * 1024 * 350;
+    const initialTotal = isLive ? 0 : 0;
     const cleanTitle = parsed.title.replace(/[\\/:*?"<>|]/g, '_').substring(0, 30);
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const ext = quality.format === 'm3u8' ? 'ts' : quality.format;
     const filename = `${parsed.platformName}_${parsed.anchorName}_${cleanTitle}_${dateStr}.${ext}`;
+    const settings = settingsService.getSettings();
+    const downloadDir = settings.downloadDir || settings.downloadPath || 'C:/StreamGet/Downloads';
 
     const newTask: DownloadTask = {
       id: 'task_' + Math.random().toString(36).substring(2, 9),
@@ -244,15 +126,15 @@ class DownloadEngine {
       isLiveStream: isLive,
       quality: quality,
       status: isLive ? 'recording' : 'downloading',
-      progress: 1,
-      downloadedBytes: 1024 * 1024 * 5,
+      progress: 0,
+      downloadedBytes: 0,
       totalBytes: initialTotal,
-      speedBytesPerSec: 1024 * 1024 * 3.5,
-      elapsedSeconds: 1,
-      etaSeconds: 120,
+      speedBytesPerSec: 0,
+      elapsedSeconds: 0,
+      etaSeconds: 0,
       startTime: Date.now(),
-      filePath: `C:/StreamGet/Downloads/${filename}`,
-      fileSizeFormatted: '5.0 MB (初始化...)',
+      filePath: `${downloadDir}/${filename}`,
+      fileSizeFormatted: '0.0 MB (就绪)',
       streamUrl: quality.url,
       segmentDurationMinutes: 60,
       segmentsCount: 1,
@@ -266,6 +148,21 @@ class DownloadEngine {
     );
     this.persister.schedule();
     this.notify();
+
+    // 触发 Electron 主进程真实磁盘文件分块写入
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.start({
+        taskId: newTask.id,
+        url: newTask.streamUrl,
+        filePath: newTask.filePath,
+      }).catch((err: any) => {
+        logger.addLog('error', 'DOWNLOADER', `启动录制引擎失败: ${err?.message || err}`);
+      });
+    } else {
+      logger.addLog('warn', 'DOWNLOADER', '当前运行于浏览器环境，完整录制文件落盘请在客户端中运行');
+    }
+
     return newTask;
   }
 
@@ -278,23 +175,42 @@ class DownloadEngine {
       }
       return t;
     });
+
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.pause(id).catch(() => {});
+    }
+
     this.persister.schedule();
     this.notify();
   }
 
   public resumeTask(id: string) {
     this.hasLocalChanges = true;
+    let targetTask: DownloadTask | undefined;
     this.tasks = this.tasks.map((t) => {
       if (t.id === id) {
+        targetTask = t;
         logger.addLog('info', 'DOWNLOADER', `恢复下载任务: ${t.title}`);
         return {
           ...t,
           status: t.isLiveStream ? ('recording' as DownloadStatus) : ('downloading' as DownloadStatus),
-          speedBytesPerSec: 1024 * 1024 * 3.2,
         };
       }
       return t;
     });
+
+    if (targetTask) {
+      const api = electronApi();
+      if (inElectron() && api?.recorder) {
+        api.recorder.start({
+          taskId: targetTask.id,
+          url: targetTask.streamUrl,
+          filePath: targetTask.filePath,
+        }).catch(() => {});
+      }
+    }
+
     this.persister.schedule();
     this.notify();
   }
@@ -315,6 +231,12 @@ class DownloadEngine {
       }
       return t;
     });
+
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.stop(id).catch(() => {});
+    }
+
     this.persister.schedule();
     this.notify();
   }
@@ -336,6 +258,12 @@ class DownloadEngine {
     if (task) {
       logger.addLog('info', 'DOWNLOADER', `移除下载任务: ${task.title}`);
     }
+
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.stop(id).catch(() => {});
+    }
+
     this.tasks = this.tasks.filter((t) => t.id !== id);
     this.persister.schedule();
     this.notify();

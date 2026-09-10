@@ -108,6 +108,21 @@ export const DownloadCard: React.FC<DownloadCardProps> = ({ task, onPreview }) =
 
         {/* Action Controls */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {/* Open in Explorer */}
+          <button
+            onClick={() => {
+              if (window.streamget?.app?.showItemInFolder) {
+                window.streamget.app.showItemInFolder(task.filePath);
+              } else if (window.streamget?.app?.openPath) {
+                window.streamget.app.openPath(task.filePath);
+              }
+            }}
+            className="p-2 rounded-lg bg-slate-800 hover:bg-cyan-500/20 hover:text-cyan-300 text-slate-300 border border-slate-700/80 transition-colors"
+            title="在系统文件管理器中定位"
+          >
+            <FolderOpen className="w-4 h-4" />
+          </button>
+
           {/* Preview / Play */}
           <button
             onClick={() => onPreview(task)}

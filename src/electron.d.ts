@@ -25,6 +25,17 @@ type StreamgetSidecarStatus = {
   error?: string;
 };
 
+type StreamRecorderProgressPayload = {
+  taskId: string;
+  downloadedBytes: number;
+  totalBytes: number;
+  speedBytesPerSec: number;
+  status: 'recording' | 'downloading' | 'completed' | 'paused' | 'failed';
+  elapsedSeconds: number;
+  filePath: string;
+  error?: string;
+};
+
 interface Window {
   streamget?: {
     isElectron: true;
@@ -48,10 +59,20 @@ interface Window {
     dialog: {
       selectDirectory: () => Promise<string | null>;
     };
+    recorder: {
+      start: (payload: { taskId: string; url: string; filePath: string; headers?: Record<string, string> }) => Promise<{ ok: boolean; error?: string }>;
+      pause: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      stop: (taskId: string) => Promise<{ ok: boolean; error?: string }>;
+      onProgress: (cb: (data: StreamRecorderProgressPayload) => void) => () => void;
+    };
+    cookies: {
+      openLoginSession: (payload: { url: string; domain?: string }) => Promise<{ ok: boolean; cookieString?: string; count?: number; error?: string }>;
+    };
     app: {
       setAutoStart: (enabled: boolean) => Promise<boolean>;
       getAutoStart: () => Promise<boolean>;
       openPath: (target: string) => Promise<void>;
+      showItemInFolder: (target: string) => Promise<void>;
       getUserData: () => Promise<string>;
     };
   };

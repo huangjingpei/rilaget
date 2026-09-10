@@ -1,13 +1,27 @@
 import { MonitoredAnchor, PlatformId } from '../types';
 import { logger } from './logger';
 import { loadStore, makePersister } from './persistence';
+import { parseStreamUrl } from './streamParser';
+import { cookieService } from './cookieService';
+import { downloadEngine } from './downloadEngine';
+import { settingsService } from './settingsService';
 
 type AnchorListener = (anchors: MonitoredAnchor[]) => void;
+
+function generateDefaultAvatar(name: string): string {
+  const initial = (name || '主').slice(0, 1).toUpperCase();
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120"><rect width="120" height="120" rx="60" fill="%231e293b"/><text x="50%" y="54%" dominant-baseline="middle" text-anchor="middle" font-size="48" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-weight="bold" fill="%2338bdf8">${encodeURIComponent(initial)}</text></svg>`;
+}
+
+function generateDefaultCover(): string {
+  return `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360"><rect width="640" height="360" fill="%23090d16"/><circle cx="320" cy="180" r="40" fill="%231e293b"/><path d="M312 165 L335 180 L312 195 Z" fill="%2306b6d4"/></svg>`;
+}
 
 class AnchorService {
   private anchors: MonitoredAnchor[] = [];
   private listeners: Set<AnchorListener> = new Set();
   private timer: any = null;
+  private isChecking = false;
   private hasLocalChanges = false;
   private persister = makePersister('anchors', () => this.anchors, 800);
 
@@ -20,148 +34,144 @@ class AnchorService {
   private async hydrate() {
     const stored = await loadStore<MonitoredAnchor[]>('anchors');
     if (this.hasLocalChanges || !Array.isArray(stored)) return;
-    this.anchors = stored;
-    logger.addLog('info', 'MONITOR', `已从本地存储恢复 ${this.anchors.length} 位关注主播`);
+    // 过滤掉历史残留的原型假主播
+    this.anchors = stored.filter(
+      (a) =>
+        !a.id.startsWith('anc_douyin_01') &&
+        !a.id.startsWith('anc_bilibili_02') &&
+        !a.id.startsWith('anc_kuaishou_03') &&
+        !a.id.startsWith('anc_huya_04') &&
+        !a.id.startsWith('anc_tiktok_05')
+    );
+    if (this.anchors.length > 0) {
+      logger.addLog('info', 'MONITOR', `已从本地存储恢复 ${this.anchors.length} 位关注主播`);
+    }
     this.notify();
   }
 
   private initDefaultAnchors() {
-    this.anchors = [
-      {
-        id: 'anc_douyin_01',
-        platform: 'douyin',
-        roomId: '80017709309',
-        url: 'https://live.douyin.com/80017709309',
-        name: '东方甄选直播间',
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-        coverUrl: 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80',
-        category: '电商带货',
-        tags: ['重点关注', '全天轮播', '自动切片'],
-        isLive: true,
-        currentTitle: '【官方正品】全品类专场直播，点击右下角小黄车！',
-        viewerCount: 48290,
-        lastLiveTime: '2026-08-31 08:00',
-        autoRecord: true,
-        qualityPreference: 'origin_4k',
-        recordFormat: 'flv',
-        totalRecordingsCount: 14,
-        checkIntervalSeconds: 30,
-        lastCheckedAt: Date.now(),
-      },
-      {
-        id: 'anc_bilibili_02',
-        platform: 'bilibili',
-        roomId: '5440',
-        url: 'https://live.bilibili.com/5440',
-        name: '虚拟偶像Official',
-        avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=150&auto=format&fit=crop&q=80',
-        coverUrl: 'https://images.unsplash.com/photo-1514525253161-7a46d19cd819?w=600&auto=format&fit=crop&q=80',
-        category: '虚拟主播',
-        tags: ['音乐歌回', '深夜电台'],
-        isLive: true,
-        currentTitle: '【新歌歌回】周一晚间电台互动&全新原创曲首播！',
-        viewerCount: 124500,
-        lastLiveTime: '2026-08-31 19:30',
-        autoRecord: true,
-        qualityPreference: 'hd_1080p',
-        recordFormat: 'mp4',
-        totalRecordingsCount: 28,
-        checkIntervalSeconds: 60,
-        lastCheckedAt: Date.now(),
-      },
-      {
-        id: 'anc_kuaishou_03',
-        platform: 'kuaishou',
-        roomId: '3x59rwycquq8e4k',
-        url: 'https://live.kuaishou.com/u/3x59rwycquq8e4k',
-        name: '户外大强哥',
-        avatar: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80',
-        coverUrl: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&auto=format&fit=crop&q=80',
-        category: '户外生活',
-        tags: ['野钓', '生存挑战'],
-        isLive: false,
-        currentTitle: '深山野钓连竿挑战（已下播）',
-        viewerCount: 0,
-        lastLiveTime: '2026-08-30 22:15',
-        autoRecord: false,
-        qualityPreference: 'hd_1080p',
-        recordFormat: 'ts',
-        totalRecordingsCount: 6,
-        checkIntervalSeconds: 45,
-        lastCheckedAt: Date.now(),
-      },
-      {
-        id: 'anc_huya_04',
-        platform: 'huya',
-        roomId: '99999',
-        url: 'https://www.huya.com/99999',
-        name: 'LPL官方赛事直播',
-        avatar: 'https://images.unsplash.com/photo-1566492031773-4f4e44671857?w=150&auto=format&fit=crop&q=80',
-        coverUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
-        category: '电子竞技',
-        tags: ['官方赛事', '4K原画'],
-        isLive: true,
-        currentTitle: '【2026职业联赛】春季常规赛第一轮淘汰焦点对决',
-        viewerCount: 389000,
-        lastLiveTime: '2026-08-31 15:00',
-        autoRecord: true,
-        qualityPreference: 'origin_4k',
-        recordFormat: 'flv',
-        totalRecordingsCount: 52,
-        checkIntervalSeconds: 30,
-        lastCheckedAt: Date.now(),
-      },
-      {
-        id: 'anc_tiktok_05',
-        platform: 'tiktok',
-        roomId: 'gameonlive',
-        url: 'https://www.tiktok.com/@gameonlive/live',
-        name: 'GamingMaster_Official',
-        avatar: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150&auto=format&fit=crop&q=80',
-        coverUrl: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80',
-        category: 'Gaming',
-        tags: ['Esports', 'Global'],
-        isLive: true,
-        currentTitle: '🏆 World Championship Finals Live Stream',
-        viewerCount: 32410,
-        lastLiveTime: '2026-08-31 12:00',
-        autoRecord: false,
-        qualityPreference: 'hd_1080p',
-        recordFormat: 'flv',
-        totalRecordingsCount: 3,
-        checkIntervalSeconds: 60,
-        lastCheckedAt: Date.now(),
-      }
-    ];
+    this.anchors = [];
   }
 
+  /** 启动后台真实开播轮询定时器 */
   private startPolling() {
+    if (this.timer) clearInterval(this.timer);
+    const intervalSec = Math.max(10, settingsService.getSettings().monitorCheckIntervalSeconds || 30);
     this.timer = setInterval(() => {
-      this.anchors = this.anchors.map((a) => ({
-        ...a,
-        lastCheckedAt: Date.now(),
-        viewerCount: a.isLive ? Math.max(100, Math.floor(a.viewerCount + (Math.random() - 0.48) * 150)) : 0,
-      }));
+      void this.checkAllNow();
+    }, intervalSec * 1000);
+  }
+
+  /** 对所有关注的主播执行真实开播状态检测与自动录制触发 */
+  public async checkAllNow(): Promise<void> {
+    if (this.isChecking || this.anchors.length === 0) return;
+    this.isChecking = true;
+
+    try {
+      for (const anchor of [...this.anchors]) {
+        await this.checkSingleAnchor(anchor);
+      }
+    } finally {
+      this.isChecking = false;
+    }
+  }
+
+  /** 检测单个主播的真实直播状态 */
+  public async checkSingleAnchor(anchor: MonitoredAnchor): Promise<boolean> {
+    const cookie = cookieService.getCookieForPlatform(anchor.platform);
+    try {
+      const parsed = await parseStreamUrl(anchor.url, cookie);
+      const wasLive = anchor.isLive;
+      const isNowLive = Boolean(parsed.isLive);
+
+      let updatedAvatar = anchor.avatar;
+      if (parsed.anchorAvatar && !parsed.anchorAvatar.includes('unsplash.com')) {
+        updatedAvatar = parsed.anchorAvatar;
+      }
+      let updatedCover = anchor.coverUrl;
+      if (parsed.coverUrl && !parsed.coverUrl.includes('unsplash.com')) {
+        updatedCover = parsed.coverUrl;
+      }
+
+      const updatedName = parsed.anchorName && parsed.anchorName !== '直播间' && anchor.name.startsWith('主播_')
+        ? parsed.anchorName
+        : anchor.name;
+
+      const updatedTitle = parsed.title || anchor.currentTitle;
+
+      this.anchors = this.anchors.map((a) => {
+        if (a.id === anchor.id) {
+          return {
+            ...a,
+            name: updatedName,
+            avatar: updatedAvatar,
+            coverUrl: updatedCover,
+            currentTitle: updatedTitle,
+            isLive: isNowLive,
+            lastCheckedAt: Date.now(),
+            lastLiveTime: isNowLive ? '正在直播' : wasLive ? '刚刚下播' : a.lastLiveTime,
+          };
+        }
+        return a;
+      });
+
+      // 状态变动事件处理
+      if (!wasLive && isNowLive) {
+        logger.addLog('success', 'MONITOR', `关注主播 [${updatedName}] 已经开播: ${updatedTitle}`);
+
+        // 自动录制逻辑
+        if (anchor.autoRecord && parsed.qualities.length > 0) {
+          const isAlreadyRecording = downloadEngine.getTasks().some(
+            (t) => t.url === anchor.url && (t.status === 'recording' || t.status === 'downloading')
+          );
+
+          if (!isAlreadyRecording) {
+            const targetQuality =
+              parsed.qualities.find((q) => q.id === anchor.qualityPreference) || parsed.qualities[0];
+            downloadEngine.addTask(parsed, targetQuality);
+            logger.addLog('info', 'MONITOR', `已为 [${updatedName}] 自动触发录制: ${targetQuality.name}`);
+
+            this.anchors = this.anchors.map((a) =>
+              a.id === anchor.id ? { ...a, totalRecordingsCount: (a.totalRecordingsCount || 0) + 1 } : a
+            );
+          }
+        }
+      } else if (wasLive && !isNowLive) {
+        logger.addLog('warn', 'MONITOR', `主播 [${updatedName}] 直播已结束`);
+      }
+
+      this.persister.schedule();
       this.notify();
-    }, 15000);
+      return isNowLive;
+    } catch (err: any) {
+      // 解析失败可能为网络闪断或房间不存在，不抛出异常破坏轮询队列
+      this.anchors = this.anchors.map((a) =>
+        a.id === anchor.id ? { ...a, lastCheckedAt: Date.now() } : a
+      );
+      this.notify();
+      return anchor.isLive;
+    }
   }
 
   public addAnchor(data: Partial<MonitoredAnchor> & { url: string; name: string; platform: PlatformId }): MonitoredAnchor {
     this.hasLocalChanges = true;
+    const defaultAvatar = generateDefaultAvatar(data.name);
+    const defaultCover = generateDefaultCover();
+
     const newAnchor: MonitoredAnchor = {
       id: 'anc_' + Math.random().toString(36).substring(2, 9),
       platform: data.platform,
       roomId: data.roomId || 'room_' + Math.floor(Math.random() * 900000 + 100000),
       url: data.url,
       name: data.name,
-      avatar: data.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
-      coverUrl: data.coverUrl || 'https://images.unsplash.com/photo-1511512578047-dfb367046420?w=600&auto=format&fit=crop&q=80',
+      avatar: data.avatar || defaultAvatar,
+      coverUrl: data.coverUrl || defaultCover,
       category: data.category || '综合',
-      tags: data.tags || ['新增主播'],
-      isLive: true,
-      currentTitle: data.currentTitle || '精彩直播正在进行中...',
-      viewerCount: Math.floor(2000 + Math.random() * 20000),
-      lastLiveTime: '刚刚',
+      tags: data.tags || ['新关注'],
+      isLive: false,
+      currentTitle: data.currentTitle || '等待开播中...',
+      viewerCount: 0,
+      lastLiveTime: '未开播',
       autoRecord: data.autoRecord ?? true,
       qualityPreference: data.qualityPreference || 'origin_4k',
       recordFormat: data.recordFormat || 'flv',
@@ -171,9 +181,17 @@ class AnchorService {
     };
 
     this.anchors = [newAnchor, ...this.anchors];
-    logger.addLog('info', 'MONITOR', `新增关注主播: [${newAnchor.platform.toUpperCase()}] ${newAnchor.name} (自动录制: ${newAnchor.autoRecord ? '开启' : '关闭'})`);
+    logger.addLog(
+      'info',
+      'MONITOR',
+      `新增关注主播: [${newAnchor.platform.toUpperCase()}] ${newAnchor.name} (自动录制: ${newAnchor.autoRecord ? '开启' : '关闭'})`
+    );
     this.persister.schedule();
     this.notify();
+
+    // 异步在后台立即探测真实状态并刷新信息
+    void this.checkSingleAnchor(newAnchor);
+
     return newAnchor;
   }
 
@@ -204,8 +222,7 @@ class AnchorService {
         return {
           ...a,
           isLive: nextLive,
-          viewerCount: nextLive ? Math.floor(5000 + Math.random() * 25000) : 0,
-          lastLiveTime: nextLive ? '刚刚' : a.lastLiveTime,
+          lastLiveTime: nextLive ? '刚刚开播' : '已下播',
         };
       }
       return a;

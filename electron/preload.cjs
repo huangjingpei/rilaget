@@ -30,10 +30,24 @@ contextBridge.exposeInMainWorld('streamget', {
   dialog: {
     selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   },
+  recorder: {
+    start: (payload) => ipcRenderer.invoke('recorder:start', payload),
+    pause: (taskId) => ipcRenderer.invoke('recorder:pause', taskId),
+    stop: (taskId) => ipcRenderer.invoke('recorder:stop', taskId),
+    onProgress: (cb) => {
+      const listener = (_event, data) => cb(data);
+      ipcRenderer.on('stream:progress', listener);
+      return () => ipcRenderer.removeListener('stream:progress', listener);
+    },
+  },
+  cookies: {
+    openLoginSession: (payload) => ipcRenderer.invoke('cookies:openLoginSession', payload),
+  },
   app: {
     setAutoStart: (enabled) => ipcRenderer.invoke('app:setAutoStart', enabled),
     getAutoStart: () => ipcRenderer.invoke('app:getAutoStart'),
     openPath: (target) => ipcRenderer.invoke('shell:openPath', target),
+    showItemInFolder: (target) => ipcRenderer.invoke('shell:showItemInFolder', target),
     getUserData: () => ipcRenderer.invoke('app:getUserData'),
   },
 });

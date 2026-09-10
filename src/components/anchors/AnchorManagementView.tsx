@@ -44,6 +44,7 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [currentPage, setCurrentPage] = useState(1);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Add Form state
   const [newPlatform, setNewPlatform] = useState<PlatformId>('douyin');
@@ -126,6 +127,29 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
     }
   };
 
+  const handlePreviewAnchor = async (anchor: MonitoredAnchor) => {
+    try {
+      const parsed = await parseStreamUrl(anchor.url);
+      if (!parsed.isLive || parsed.qualities.length === 0) {
+        alert(`主播 [${anchor.name}] 当前未开播，暂无有效直播流`);
+        return;
+      }
+      const quality = parsed.qualities.find((q) => q.id === anchor.qualityPreference) || parsed.qualities[0];
+      onOpenPlayer(quality.url, `${anchor.name} - ${parsed.title}`, true);
+    } catch (e: any) {
+      alert(`解析直播流失败: ${e?.message || '请确认直播间链接有效'}`);
+    }
+  };
+
+  const handleRefreshAll = async () => {
+    setIsRefreshing(true);
+    try {
+      await anchorService.checkAllNow();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden p-4 space-y-3">
       {/* Top Header & Filter Toolbar */}
@@ -141,13 +165,27 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
             </span>
           </div>
 
-          <button
-            onClick={() => setIsAddModalOpen(true)}
-            className="h-7 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>添加主播</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRefreshAll}
+              disabled={isRefreshing}
+              className={`h-7 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 border border-slate-700 transition-colors ${
+                isRefreshing ? 'opacity-50 cursor-not-allowed' : ''
+              }`}
+              title="立即检测全部关注主播的开播状态"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
+              <span>{isRefreshing ? '检测中...' : '检测开播'}</span>
+            </button>
+
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="h-7 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition-colors"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>添加主播</span>
+            </button>
+          </div>
         </div>
 
         {/* Filter Controls Row */}
@@ -331,15 +369,9 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
                     )}
 
                     <button
-                      onClick={() =>
-                        onOpenPlayer(
-                          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-                          `${anchor.name} - ${anchor.currentTitle}`,
-                          anchor.isLive
-                        )
-                      }
+                      onClick={() => handlePreviewAnchor(anchor)}
                       className="p-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white"
-                      title="预览试看"
+                      title="预览试看真实直播流"
                     >
                       <Eye className="w-3.5 h-3.5 text-cyan-400" />
                     </button>
@@ -424,15 +456,9 @@ export const AnchorManagementView: React.FC<AnchorManagementViewProps> = ({
                       </button>
                     )}
                     <button
-                      onClick={() =>
-                        onOpenPlayer(
-                          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-                          `${anchor.name} - ${anchor.currentTitle}`,
-                          anchor.isLive
-                        )
-                      }
+                      onClick={() => handlePreviewAnchor(anchor)}
                       className="p-1 rounded hover:bg-slate-700 text-slate-300"
-                      title="预览"
+                      title="预览试看真实直播流"
                     >
                       <Eye className="w-3.5 h-3.5 text-cyan-400" />
                     </button>

@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Tray, Menu, nativeImage, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
+const { StreamRecorderManager } = require('./streamRecorder.cjs');
 
 const STORE_KEYS = new Set(['settings', 'tasks', 'anchors', 'cookies']);
 
@@ -91,6 +92,7 @@ function buildTrayPng() {
 let mainWindow = null;
 let tray = null;
 let sidecar = null;
+let recorder = null;
 let isQuitting = false;
 
 function projectRoot() {
@@ -268,6 +270,50 @@ function registerIpc() {
     return shell.openPath(target);
   });
   ipcMain.handle('app:getUserData', () => app.getPath('userData'));
+  ipcMain.handle('shell:showItemInFolder', (_event, target) => {
+    if (!target || typeof target !== 'string') return;
+    shell.showItemInFolder(target);
+  });
+
+  ipcMain.handle('recorder:start', (_event, payload) => {
+    return recorder?.start(payload);
+  });
+  ipcMain.handle('recorder:pause', (_event, taskId) => {
+    return recorder?.pause(taskId);
+  });
+  ipcMain.handle('recorder:stop', (_event, taskId) => {
+    return recorder?.stop(taskId);
+  });
+
+  ipcMain.handle('cookies:openLoginSession', async (_event, { url, domain }) => {
+    return new Promise((resolve) => {
+      const loginWin = new BrowserWindow({
+        width: 960,
+        height: 720,
+        title: '登录以捕获平台 Cookie - StreamGet',
+        parent: mainWindow || undefined,
+        modal: true,
+        webPreferences: {
+          partition: 'persist:streamget_auth',
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
+
+      loginWin.loadURL(url);
+
+      loginWin.on('closed', async () => {
+        try {
+          const authSession = session.fromPartition('persist:streamget_auth');
+          const cookies = await authSession.cookies.get(domain ? { domain } : {});
+          const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+          resolve({ ok: true, cookieString: cookieStr, count: cookies.length });
+        } catch (e) {
+          resolve({ ok: false, error: e.message });
+        }
+      });
+    });
+  });
 }
 
 async function startSidecar() {
@@ -300,12 +346,14 @@ if (!gotLock) {
     registerIpc();
     await startSidecar();
     createWindow();
+    recorder = new StreamRecorderManager(() => mainWindow);
     createTray();
   });
 
   app.on('before-quit', () => {
     isQuitting = true;
     sidecar?.stop();
+    recorder?.destroy();
   });
 
   app.on('window-all-closed', () => {
