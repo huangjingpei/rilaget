@@ -30,10 +30,16 @@ class ScraperService {
 
   private initDanmakuBridge() {
     const api = electronApi();
-    if (inElectron() && api?.sidecar?.onDanmaku) {
+    const isElec = inElectron();
+    console.log('[ScraperService] initDanmakuBridge:', { isElec, hasApi: !!api, hasSidecar: !!api?.sidecar, hasOnDanmaku: !!api?.sidecar?.onDanmaku });
+    if (isElec && api?.sidecar?.onDanmaku) {
       api.sidecar.onDanmaku((packet) => {
+        console.log('[ScraperService] onDanmaku packet received:', packet);
         this.handleIncomingPacket(packet);
       });
+      console.log('[ScraperService] danmaku IPC listener registered ✓');
+    } else {
+      console.warn('[ScraperService] danmaku bridge NOT set up — isElec:', isElec, 'api:', api);
     }
   }
 
@@ -180,6 +186,7 @@ class ScraperService {
     if (!this.data.isScraping) {
       // 启动采集
       const targetUrl = this.data.url || (this.data.roomId.startsWith('http') ? this.data.roomId : '');
+      console.log('[ScraperService] toggleScraping START — targetUrl:', targetUrl, 'data.url:', this.data.url, 'roomId:', this.data.roomId);
       if (!targetUrl) {
         logger.addLog('warn', 'MONITOR', '请先配置或选择包含有效直播间 URL 的目标');
         return;
@@ -190,17 +197,20 @@ class ScraperService {
       this.notify();
 
       const api = electronApi();
+      console.log('[ScraperService] toggleScraping — inElectron:', inElectron(), 'hasDanmakuStart:', !!api?.sidecar?.danmakuStart);
       if (inElectron() && api?.sidecar?.danmakuStart) {
         logger.addLog('info', 'MONITOR', `正在启动浏览器弹幕捕获: [${this.data.platform}] ${targetUrl}`);
         try {
-          await api.sidecar.danmakuStart({
+          const result = await api.sidecar.danmakuStart({
             platform: this.data.platform,
             url: targetUrl,
             roomId: this.data.roomId,
             headless: this.data.headless !== false,
           });
+          console.log('[ScraperService] danmakuStart result:', result);
           logger.addLog('success', 'MONITOR', `弹幕捕获引擎已就绪并开始实时监听`);
         } catch (err: any) {
+          console.error('[ScraperService] danmakuStart error:', err);
           logger.addLog('error', 'MONITOR', `启动弹幕采集失败: ${err?.message || err}`);
           this.data.isScraping = false;
           this.notify();
