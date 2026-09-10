@@ -91,6 +91,7 @@ interface Window {
       openPath: (target: string) => Promise<void>;
       showItemInFolder: (target: string) => Promise<void>;
       getUserData: () => Promise<string>;
+      setProxy: (proxyUrl: string | null) => Promise<{ ok: boolean; proxy: string | null }>;
     };
   };
 }

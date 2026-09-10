@@ -21,7 +21,7 @@ from live_plate.bili.bilili import decode_packet
 from live_plate.douyin.dy import douyin_pb, douyin_pb2
 from live_plate.kuaishou.ks import kuaishou_pb
 from live_plate.nimo.nimo_tars import nimo_tars
-from live_plate.tiktok.tk import tiktok_pb
+from live_plate.tiktok.tk import tiktok_pb, tiktok_pb2
 from live_plate.facebook.facebook import ParseFaceBookComment
 from live_plate.pdd.pdd import pdd_pb,Pdd
 from live_plate.vx.vx import ParseVxMessage
@@ -212,6 +212,43 @@ class DanmuBrowserCollector:
                     function clickElementByText() {
                         const allElements = document.getElementsByTagName('*');
                         for (let i = 0; i < allElements.length; i++) {
+
+                    function checkElement() {
+
+                    const roomInfoBarOuterElements = document.querySelectorAll('.__hasOptionBar');
+                    console.log('-----',roomInfoBarOuterElements)
+                    roomInfoBarOuterElements.forEach((element) => {
+                        element.remove();
+                    });
+
+
+                        // 查找元素
+                        var playButton = document.querySelector('.JL05k7eS.OG51D9OO');
+
+                        // 检查元素是否存在
+                        if (playButton) {
+                            // 创建一个新的点击事件
+                            var clickEvent = new MouseEvent('click', {
+                                'view': window,
+                                'bubbles': true,
+                                'cancelable': true
+                            });
+
+                            // 触发点击事件
+                            playButton.dispatchEvent(clickEvent);
+                            location.reload();
+
+                            console.log("点击了播放按钮");
+                        } else {
+                            console.log("元素不存在");
+                        }
+                    }
+                    
+                    
+                    
+                    function clickElementByText() {
+                        const allElements = document.getElementsByTagName('*');
+                        for (let i = 0; i < allElements.length; i++) {
                             const element = allElements[i];
                             if (element.textContent.trim() === "继续播放") {
                                 element.click();
@@ -220,20 +257,13 @@ class DanmuBrowserCollector:
                         }
                         console.log("不存在")
                     }
-
                     
                 """)
 
     def browser_close(self):
         """
-        # =====================================
-        # 关闭浏览器，失效
-        # =====================================
-        :param response:
-        :return:
+        关闭浏览器，失效
         """
-        # Playwright 同步对象必须由创建它的线程关闭；这里只发停止信号，
-        # browser_launch() 的 finally 会在采集线程完成资源释放。
         self._stop_event.set()
 
     def http(self, response):
@@ -246,27 +276,27 @@ class DanmuBrowserCollector:
         """
         try:
             if 'webcast/im/fetch' in response.url:
-                res = douyin_pb2(data=response.body())
-                self.PostMessage(res)
-            if '/live/msg' in response.url:
+                is_tk = 'tiktok' in response.url or self.platform == 'tiktok' or (self.page and 'tiktok.com' in (self.page.url or ''))
+                if is_tk:
+                    try:
+                        res = tiktok_pb2(data=response.body())
+                        self.PostMessage(res)
+                    except Exception as e:
+                        self.log_fn(f"TikTok HTTP 弹幕解析异常: {e}")
+                else:
+                    try:
+                        res = douyin_pb2(data=response.body())
+                        self.PostMessage(res)
+                    except Exception as e:
+                        self.log_fn(f"抖音 HTTP 弹幕解析异常: {e}")
+            elif '/live/msg' in response.url:
                 msg = ParseVxMessage(response.json())
                 self.PostMessage(msg)
-            if 'mtop.taobao.iliad.comment.query' in response.url or 'mtop.taobao.iliad.live.user.assistant.data.get' in response.url:
+            elif 'mtop.taobao.iliad.comment.query' in response.url or 'mtop.taobao.iliad.live.user.assistant.data.get' in response.url:
                 msg = self.ParseTbMessage(response.text())
                 self.PostMessage(msg)
-
-            if 'mtop.taobao.dreamweb.live.list.query' in response.url:
-                data = response.text()
-                data = data[data.find('{'): data.rfind('}') + 1]
-                data = json.loads(data)
-                for live in data['data']['data']:
-                    if live['roomStatus'] == '1':
-                        self.page.goto(
-                            f'https://liveplatform.taobao.com/restful/index/live/control?liveId={live["id"]}')
-
         except Exception as error:
-            print(error)
-            traceback.print_exc()
+            self.log_fn(f"HTTP 响应拦截处理异常: {error}")
 
     def wss(self, websocket):
 
@@ -278,52 +308,47 @@ class DanmuBrowserCollector:
         :return:
         """
         try:
-            if 'kuaishou.com' in websocket.url:
+            ws_url = websocket.url.lower()
+            if self.platform == 'kuaishou' or any(d in ws_url for d in ('kuaishou.com', 'yximgs.com', 'gifshow.com', 'kwai.com', 'kskwai.com')):
+                self.log_fn(f"已捕获快手 WebSocket 连接: {websocket.url[:70]}")
                 websocket.on('framereceived', self.ks_onmessage)
-            elif 'douyin.com/webcast/im/push/' in websocket.url:
+            elif 'douyin.com/webcast/im/push/' in ws_url or (self.platform == 'douyin' and 'im/push' in ws_url):
                 websocket.on('framereceived', self.dy_onmessage)
-            elif 'tiktok' in websocket.url and "fetch" in websocket.url:
+            elif 'tiktok' in ws_url or 'byteoversea' in ws_url or (self.platform == 'tiktok' and 'im' in ws_url):
                 websocket.on('framereceived', self.tk_onemssage)
-            elif 'live-comet' in websocket.url:
+            elif (
+                'live-comet' in ws_url
+                or 'broadcastlv' in ws_url
+                or (self.platform == 'bilibili' and ('/sub' in ws_url or 'broadcast' in ws_url))
+            ) and 'tracker' not in ws_url and 'p2p' not in ws_url and 'stun' not in ws_url:
+                self.log_fn(f"已捕获 Bilibili 弹幕 WebSocket 连接: {websocket.url[:70]}")
                 websocket.on('framereceived', self.bili_onemssage)
-            elif 'ws.master.live' in websocket.url:
+            elif 'ws.master.live' in ws_url:
                 websocket.on('framereceived', self.nimo_onmessage)
-
-            elif 'pinduoduo.com' in websocket.url or 'yangkeduo.com' in websocket.url:
+            elif 'pinduoduo.com' in ws_url or 'yangkeduo.com' in ws_url:
                 websocket.on('framereceived', self.pdd_onmessage2)
-
-            elif 'facebook.com/ws/realtime' in websocket.url:
+            elif 'facebook.com/ws/realtime' in ws_url:
                 websocket.on('framereceived', self.facebook_onmessage)
-
-
             elif 'longlink' in websocket.url:
                 websocket.on('framereceived', self.xhs_onmessage)
-
             elif 'rwp' in websocket.url:
                 websocket.on('framereceived', self.xhs_shop_onmessage)
-
         except Exception as error:
-            print(json.dumps({
-                "type": "SystemMessage",
-                "content": f"监听websocket出错了{error}"
-
-            }, ensure_ascii=False), flush=True)
+            self.log_fn(f"监听 websocket 出错: {error}")
 
     def xhs_onmessage(self, framereceived):
         try:
-
             res = self.ParseXhsMessage(framereceived)
             self.PostMessage(res)
         except Exception as error:
-            print('xhs_onmessage error', error)
+            self.log_fn(f"小红书弹幕解析失败: {error}")
 
     def xhs_shop_onmessage(self, framereceived):
         try:
             res = self.ParseXhsShopMessage(framereceived)
             self.PostMessage(res)
-
         except Exception as error:
-            print(error)
+            self.log_fn(f"小红书商城消息解析失败: {error}")
 
     def facebook_onmessage(self, framereceived):
         try:
@@ -339,13 +364,14 @@ class DanmuBrowserCollector:
 
     def bili_onemssage(self, framereceived):
         try:
+            if isinstance(framereceived, str):
+                # 忽略 WebRTC / P2P 握手控制文本帧
+                return
             res = decode_packet(framereceived)
-            if 'listmessage' in res:
+            if res and 'listmessage' in res and res['listmessage']:
                 self.PostMessage(res['listmessage'])
-
         except Exception as e:
-            print(e)
-            print('出错', framereceived)
+            self.log_fn(f"Bilibili 弹幕解析异常: {e}")
 
     def ks_onmessage(self, framereceived):
         try:
@@ -487,5 +513,121 @@ driver1 = DanmuBrowserCollector
 
 
 if __name__ == '__main__':
-    driver = DanmuBrowserCollector(headless=False)
-    driver.browser_launch()
+    import argparse
+
+    def detect_platform(url: str) -> str:
+        low = url.lower()
+        if "douyin.com" in low:
+            return "douyin"
+        if "bilibili.com" in low or "b23.tv" in low:
+            return "bilibili"
+        if "kuaishou.com" in low:
+            return "kuaishou"
+        if "tiktok.com" in low:
+            return "tiktok"
+        if "xiaohongshu.com" in low or "xhslink.com" in low:
+            return "xhs"
+        if "taobao.com" in low:
+            return "tb"
+        if "pinduoduo.com" in low or "yangkeduo.com" in low:
+            return "pdd"
+        if "facebook.com" in low:
+            return "facebook"
+        if "nimo.tv" in low:
+            return "nimo"
+        return "douyin"
+
+    parser = argparse.ArgumentParser(
+        description="StreamGet 独立弹幕采集调试脚本 (支持抖音、B站、快手、TikTok、小红书等平台)"
+    )
+    parser.add_argument("url", nargs="?", default="", help="直播间网页 URL 地址")
+    parser.add_argument("-u", "--url", dest="url_opt", help="直播间网页 URL 地址")
+    parser.add_argument("-p", "--platform", help="直播平台名称 (默认根据 URL 自动识别)")
+    parser.add_argument("--headless", action="store_true", help="启用无头模式 (默认使用可见窗口，建议可见窗口以便绕过反爬验证)")
+    parser.add_argument("--json", action="store_true", help="直接输出原始 JSON 格式数据")
+    parser.add_argument("--chrome", help="自定义 Chrome 或 Edge 可执行文件路径")
+
+    args = parser.parse_args()
+    target_url = args.url_opt or args.url
+
+    if not target_url:
+        print("=" * 65)
+        print("💡 StreamGet 独立弹幕采集调试器")
+        print("用法示例:")
+        print('  python sidecar/danma/main.py "https://live.douyin.com/758123456"')
+        print('  python sidecar/danma/main.py "https://live.bilibili.com/21452505"')
+        print('  python sidecar/danma/main.py "https://live.kuaishou.com/u/xxx" --headless')
+        print("=" * 65)
+        try:
+            target_url = input("请输入要调试的直播间 URL: ").strip().strip("'\"")
+        except (KeyboardInterrupt, EOFError):
+            sys.exit(0)
+
+    if not target_url:
+        print("未输入有效直播间地址，退出。")
+        sys.exit(1)
+
+    platform = args.platform or detect_platform(target_url)
+    headless = args.headless
+
+    def pretty_print_message(items):
+        if not items:
+            return
+        if not isinstance(items, list):
+            items = [items]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if args.json:
+                print(json.dumps(item, ensure_ascii=False))
+                continue
+
+            msg_type = item.get("type") or item.get("msg_type") or "未知"
+            content = item.get("content") or item.get("text") or item.get("msg") or ""
+            user_obj = item.get("user") if isinstance(item.get("user"), dict) else {}
+            user = (
+                item.get("name")
+                or item.get("userName")
+                or item.get("nickname")
+                or item.get("senderName")
+                or item.get("author_name")
+                or user_obj.get("nickname")
+                or user_obj.get("userName")
+                or user_obj.get("name")
+                or "匿名用户"
+            )
+
+            if msg_type in ("ChatMessage", "comment", "chat"):
+                print(f"💬 [弹幕] {user}: {content}")
+            elif msg_type in ("GiftMessage", "gift"):
+                gift_name = item.get("giftName") or item.get("gift_name") or "礼物"
+                count = item.get("giftCount") or item.get("count") or 1
+                print(f"🎁 [礼物] {user} 送出 {gift_name} x {count}")
+            elif msg_type in ("LikeMessage", "like"):
+                count = item.get("count") or 1
+                print(f"❤️ [点赞] {user} 点赞了直播间 (x{count})")
+            elif msg_type in ("MemberMessage", "enter"):
+                print(f"🚪 [进场] {user} 进入了直播间")
+            elif msg_type in ("SocialMessage", "follow"):
+                print(f"⭐ [关注] {user} 关注了主播")
+            elif msg_type == "SystemMessage":
+                print(f"🔔 [系统] {content}")
+            else:
+                print(f"📦 [{msg_type}] {json.dumps(item, ensure_ascii=False)}")
+
+    print(f"\n🚀 启动弹幕采集器: 平台={platform}, 模式={'无头模式(headless)' if headless else '可见窗口(headful)'}")
+    print(f"🎯 目标地址: {target_url}\n")
+
+    collector = DanmuBrowserCollector(
+        platform=platform,
+        url=target_url,
+        headless=headless,
+        chrome_path=args.chrome,
+        message_callback=pretty_print_message,
+        log_fn=lambda msg: print(f"[Log] {msg}"),
+    )
+    try:
+        collector.browser_launch()
+    except KeyboardInterrupt:
+        print("\n🛑 用户手动停止弹幕采集。")
+        collector.browser_close()

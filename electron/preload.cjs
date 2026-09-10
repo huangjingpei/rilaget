@@ -57,5 +57,6 @@ contextBridge.exposeInMainWorld('streamget', {
     openPath: (target) => ipcRenderer.invoke('shell:openPath', target),
     showItemInFolder: (target) => ipcRenderer.invoke('shell:showItemInFolder', target),
     getUserData: () => ipcRenderer.invoke('app:getUserData'),
+    setProxy: (proxyUrl) => ipcRenderer.invoke('app:setProxy', proxyUrl),
   },
 });

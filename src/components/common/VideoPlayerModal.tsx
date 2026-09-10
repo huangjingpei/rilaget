@@ -16,8 +16,10 @@ import {
   Copy,
   AlertTriangle,
   ExternalLink,
+  Globe,
 } from 'lucide-react';
 import { logger } from '../../services/logger';
+import { settingsService } from '../../services/settingsService';
 
 import mpegts from 'mpegts.js';
 import Hls from 'hls.js';
@@ -56,6 +58,25 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     format: string;
   }>({ width: 0, height: 0, duration: 0, format: '检测中...' });
   const [danmakuItems, setDanmakuItems] = useState<{ id: string; text: string; top: number; color: string }[]>([]);
+  const currentSettings = settingsService.getSettings();
+
+  const lowerUrl = (streamUrl || '').toLowerCase();
+  const isYoutube = lowerUrl.includes('googlevideo.com') || lowerUrl.includes('youtube.com');
+  const isForeignPlatform = isYoutube || lowerUrl.includes('twitch.tv') || lowerUrl.includes('chzzk') || lowerUrl.includes('sooplive') || lowerUrl.includes('afreecatv');
+
+  const handleEnableProxyAndRetry = async () => {
+    settingsService.updateSettings({ proxyEnabled: true, proxyUrl: 'http://127.0.0.1:10808' });
+    const api = (window as any).streamget;
+    if (api?.app?.setProxy) {
+      try {
+        await api.app.setProxy('http://127.0.0.1:10808');
+      } catch (e) {
+        console.warn('调用 setProxy 失败:', e);
+      }
+    }
+    setLoadError(null);
+    setRetryCount((c) => c + 1);
+  };
 
   useEffect(() => {
     if (!isOpen || !streamUrl) return;
@@ -136,15 +157,17 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       try {
         const hls = new Hls({
           enableWorker: true,
-          lowLatencyMode: true,
-          backBufferLength: 60,
+          lowLatencyMode: !isYoutube,
+          backBufferLength: 90,
           maxBufferLength: 30,
-          manifestLoadingTimeOut: 15000,
-          manifestLoadingMaxRetry: 4,
-          levelLoadingTimeOut: 15000,
-          levelLoadingMaxRetry: 4,
-          fragLoadingTimeOut: 20000,
-          fragLoadingMaxRetry: 5,
+          maxMaxBufferLength: 60,
+          manifestLoadingTimeOut: 20000,
+          manifestLoadingMaxRetry: 5,
+          levelLoadingTimeOut: 20000,
+          levelLoadingMaxRetry: 5,
+          fragLoadingTimeOut: 30000,
+          fragLoadingMaxRetry: 6,
+          maxFragLookUpTolerance: 0.3,
           xhrSetup: (xhr) => {
             xhr.withCredentials = false;
           },
@@ -157,9 +180,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         });
 
         let networkErrorRetries = 0;
+        let fragErrorRetries = 0;
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
             console.warn('[VideoPlayer] HLS fatal error:', data.type, data.details);
+            if (data.details === Hls.ErrorDetails.FRAG_LOAD_ERROR || data.details === Hls.ErrorDetails.FRAG_LOAD_TIMEOUT) {
+              if (fragErrorRetries < 3) {
+                fragErrorRetries++;
+                console.log(`[VideoPlayer] 正在重试加载视频分片 (${fragErrorRetries}/3)...`);
+                hls.startLoad();
+                return;
+              }
+            }
+
             switch (data.type) {
               case Hls.ErrorTypes.NETWORK_ERROR:
                 if (networkErrorRetries < 2) {
@@ -168,7 +201,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                   hls.startLoad();
                 } else {
                   const extra = isYoutube
-                    ? '（YouTube 流媒体服务器位于海外，若无法连接请确保已在客户端 [系统设置] 中开启代理配置，如 http://127.0.0.1:7890）'
+                    ? '（YouTube 视频分片服务器位于海外，若直连超时请确保已在客户端 [系统设置] 中开启代理，如 http://127.0.0.1:10808）'
                     : '';
                   setLoadError(`HLS 流加载异常: ${data.details} ${extra}`);
                 }
@@ -280,6 +313,19 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     LIVE 实时流
                   </span>
                 )}
+                {isForeignPlatform && (
+                  currentSettings.proxyEnabled ? (
+                    <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-cyan-400" />
+                      代理加速开启
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-[10px] font-mono rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      <Globe className="w-3 h-3 text-amber-400" />
+                      直连海外 (卡顿可开代理)
+                    </span>
+                  )
+                )}
               </div>
               <p className="text-[11px] text-slate-400 font-mono truncate max-w-md mt-0.5">{streamUrl}</p>
             </div>
@@ -329,15 +375,30 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
               <div className="max-w-md space-y-1">
                 <h4 className="text-sm font-bold text-white">流媒体加载异常</h4>
                 <p className="text-xs text-rose-300 leading-relaxed font-mono">{loadError}</p>
+                {isForeignPlatform && (
+                  <p className="text-[11px] text-slate-400 pt-1">
+                    提示：海外流媒体服务器（Google Video / Twitch CDN）在国内直连易被防火墙阻断。请开启本地代理（10808 端口）后重试。
+                  </p>
+                )}
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                {isForeignPlatform && (
+                  <button
+                    onClick={handleEnableProxyAndRetry}
+                    className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-lg shadow-cyan-900/40 transition-all cursor-pointer"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>启用 10808 代理并重试</span>
+                  </button>
+                )}
+
                 <button
                   onClick={() => {
                     setLoadError(null);
                     setRetryCount((c) => c + 1);
                   }}
-                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition-colors"
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition-colors cursor-pointer"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
                   <span>重新加载</span>
@@ -349,7 +410,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
                     setCopiedStreamUrl(true);
                     setTimeout(() => setCopiedStreamUrl(false), 2000);
                   }}
-                  className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors"
+                  className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
                 >
                   {copiedStreamUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                   <span>{copiedStreamUrl ? '已复制流地址' : '复制流地址 (外部播放)'}</span>

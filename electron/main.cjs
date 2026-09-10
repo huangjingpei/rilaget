@@ -131,7 +131,10 @@ function readSettings() {
 function applyProxySettings() {
   const settings = readSettings();
   if (settings && settings.proxyEnabled && settings.proxyUrl) {
-    session.defaultSession.setProxy({ proxyRules: settings.proxyUrl }).catch((err) => {
+    session.defaultSession.setProxy({
+      proxyRules: settings.proxyUrl,
+      proxyBypassRules: '<local>;*.bilibili.com;*.bilivideo.com;*.douyin.com;*.bytevcloud.com;*.amemv.com;*.kuaishou.com;*.yximgs.com;*.huya.com;*.douyu.com',
+    }).catch((err) => {
       console.warn('[Proxy] 设置代理失败:', err);
     });
     console.log(`[Proxy] 已为媒体播放器与会话应用代理: ${settings.proxyUrl}`);
@@ -144,10 +147,17 @@ function applyProxySettings() {
 function setupMediaNetworkInterceptors() {
   // 1. 跨域头自动修复（避免各平台 CDN 未声明 CORS 导致 HLS/FLV 播放被拦截）
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    const responseHeaders = details.responseHeaders || {};
-    responseHeaders['access-control-allow-origin'] = ['*'];
-    responseHeaders['access-control-allow-headers'] = ['*'];
-    responseHeaders['access-control-allow-methods'] = ['GET, HEAD, OPTIONS'];
+    const responseHeaders = { ...(details.responseHeaders || {}) };
+    for (const key of Object.keys(responseHeaders)) {
+      if (key.toLowerCase() === 'access-control-allow-origin' ||
+          key.toLowerCase() === 'access-control-allow-headers' ||
+          key.toLowerCase() === 'access-control-allow-methods') {
+        delete responseHeaders[key];
+      }
+    }
+    responseHeaders['Access-Control-Allow-Origin'] = ['*'];
+    responseHeaders['Access-Control-Allow-Headers'] = ['*'];
+    responseHeaders['Access-Control-Allow-Methods'] = ['GET, HEAD, OPTIONS'];
     callback({ responseHeaders });
   });
 
@@ -340,6 +350,20 @@ function registerIpc() {
     return shell.openPath(target);
   });
   ipcMain.handle('app:getUserData', () => app.getPath('userData'));
+  ipcMain.handle('app:setProxy', async (_event, proxyUrl) => {
+    if (proxyUrl) {
+      await session.defaultSession.setProxy({
+        proxyRules: proxyUrl,
+        proxyBypassRules: '<local>;*.bilibili.com;*.bilivideo.com;*.douyin.com;*.bytevcloud.com;*.amemv.com;*.kuaishou.com;*.yximgs.com;*.huya.com;*.douyu.com',
+      });
+      console.log(`[Proxy] IPC 动态切换代理: ${proxyUrl}`);
+      return { ok: true, proxy: proxyUrl };
+    } else {
+      await session.defaultSession.setProxy({ mode: 'system' });
+      console.log('[Proxy] IPC 恢复系统代理');
+      return { ok: true, proxy: null };
+    }
+  });
   ipcMain.handle('shell:showItemInFolder', (_event, target) => {
     if (!target || typeof target !== 'string') return;
     shell.showItemInFolder(target);

@@ -79,8 +79,17 @@ class ScraperService {
   private normalizeMessage(raw: any): DanmakuMessage | null {
     const rawType = String(raw.type || '');
     const id = `dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const timestamp = Date.now();
-    const senderName = String(raw.name || raw.senderName || '热心观众').trim();
+    const userObj = (typeof raw.user === 'object' && raw.user) ? raw.user : {};
+    const senderName = String(
+      raw.name ||
+      raw.senderName ||
+      raw.userName ||
+      raw.nickname ||
+      userObj.nickname ||
+      userObj.userName ||
+      userObj.name ||
+      '热心观众'
+    ).trim();
     const content = String(raw.content || '').trim();
 
     if (rawType === 'ChatMessage' || rawType === 'chat') {

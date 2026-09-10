@@ -12,7 +12,8 @@ import {
   Sun,
   Moon,
   Code2,
-  Power
+  Power,
+  Globe,
 } from 'lucide-react';
 import { AppSettings } from '../../types';
 import { settingsService } from '../../services/settingsService';
@@ -293,6 +294,47 @@ export const SettingsView: React.FC = () => {
                         </option>
                       ))}
                     </select>
+                  </div>
+
+                  {/* Network Proxy Setting */}
+                  <div className="p-2 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-slate-200 font-semibold flex items-center gap-1.5">
+                          <Globe className="w-3.5 h-3.5 text-cyan-400" />
+                          <span>网络代理 (海外平台拉流/试看)</span>
+                        </div>
+                        <div className="text-[10px] text-slate-400">
+                          用于 YouTube、Twitch 等海外流媒体拉流与试看
+                        </div>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={settings.proxyEnabled}
+                        onChange={(e) => handleUpdate({ proxyEnabled: e.target.checked })}
+                        className="w-4 h-4 rounded text-cyan-500 cursor-pointer"
+                      />
+                    </div>
+
+                    {settings.proxyEnabled && (
+                      <div className="pt-1 flex items-center gap-2">
+                        <input
+                          type="text"
+                          placeholder="http://127.0.0.1:10808 或 http://127.0.0.1:7890"
+                          value={settings.proxyUrl || ''}
+                          onChange={(e) => handleUpdate({ proxyUrl: e.target.value })}
+                          className="flex-1 h-7 px-2 bg-slate-900 border border-slate-700 rounded-md text-slate-200 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleUpdate({ proxyUrl: 'http://127.0.0.1:10808' })}
+                          className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-cyan-300 border border-slate-700 whitespace-nowrap"
+                          title="填入本地检测到的 10808 端口"
+                        >
+                          填入 10808
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
