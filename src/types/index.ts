@@ -26,6 +26,12 @@ export type PlatformId =
   | 'baidu'
   | 'sixroom'
   | 'huajiao'
+  | 'migu'
+  | 'maoer'
+  | 'look'
+  | 'twitcasting'
+  | 'showroom'
+  | 'yiqilive'
   | 'custom';
 
 export interface PlatformInfo {

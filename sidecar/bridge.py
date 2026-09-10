@@ -120,6 +120,12 @@ PLATFORM_REGISTRY = [
     ("baidu",      "百度直播", r"live\.baidu\.com",                     "BaiduLiveStream"),
     ("sixroom",    "六间房",   r"6\.cn|sixroom\.com",                   "SixRoomLiveStream"),
     ("huajiao",    "花椒直播", r"huajiao\.com",                         "HuajiaoLiveStream"),
+    ("migu",       "咪咕视频", r"miguvideo\.com|migu\.cn",              "MiguLiveStream"),
+    ("maoer",      "猫耳FM",   r"missevan\.com",                        "MaoerLiveStream"),
+    ("look",       "网易LOOK直播", r"look\.163\.com",                   "LookLiveStream"),
+    ("twitcasting", "TwitCasting", r"twitcasting\.tv",                  "TwitCastingLiveStream"),
+    ("showroom",   "SHOWROOM", r"showroom-live\.com",                   "ShowRoomLiveStream"),
+    ("yiqilive",   "17Live",   r"17\.live",                             "YiqiLiveStream"),
 ]
 
 

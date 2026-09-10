@@ -84,6 +84,22 @@ class CookieService {
       isValid = isValid && (clean.includes('SESSDATA') || clean.includes('bili_jct') || clean.includes('DedeUserID'));
     } else if (item.platform === 'huya') {
       isValid = isValid && (clean.includes('yyuid') || clean.includes('udb_n') || clean.includes('huya_web_rep_cnt'));
+    } else if (item.platform === 'kuaishou') {
+      isValid = isValid && (clean.includes('did') || clean.includes('userId') || clean.includes('kuaishou.live'));
+    } else if (item.platform === 'douyu') {
+      isValid = isValid && (clean.includes('acf_auth') || clean.includes('dy_did') || clean.includes('acf_uid'));
+    } else if (item.platform === 'xiaohongshu') {
+      isValid = isValid && (clean.includes('a1') || clean.includes('webId') || clean.includes('xsec_token'));
+    } else if (item.platform === 'tiktok') {
+      isValid = isValid && (clean.includes('sessionid') || clean.includes('ttwid') || clean.includes('msToken'));
+    } else if (item.platform === 'weibo') {
+      isValid = isValid && (clean.includes('SUB') || clean.includes('SUBP'));
+    } else if (item.platform === 'baidu') {
+      isValid = isValid && (clean.includes('BDUSS') || clean.includes('BAIDUID'));
+    } else if (item.platform === 'taobao') {
+      isValid = isValid && (clean.includes('_m_h5_tk') || clean.includes('cookie2') || clean.includes('_tb_token_'));
+    } else if (item.platform === 'jd') {
+      isValid = isValid && (clean.includes('pt_key') || clean.includes('pt_pin'));
     }
 
     this.updateCookie(id, { isValid });
