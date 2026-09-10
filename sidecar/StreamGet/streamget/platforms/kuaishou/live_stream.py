@@ -49,7 +49,7 @@ class KwaiLiveStream(BaseLiveStream):
         """
 
         try:
-            if self.cookies.strip() != '':
+            if self.cookies and self.cookies.strip() != '':
                 name, status = await self.get_user_info(url)
                 if not status:
                     return {'anchor_name': name, 'is_live': status, 'live_url': url, 'type': 2}
