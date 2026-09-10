@@ -128,6 +128,62 @@ function readSettings() {
   return readStore('settings') || {};
 }
 
+function applyProxySettings() {
+  const settings = readSettings();
+  if (settings && settings.proxyEnabled && settings.proxyUrl) {
+    session.defaultSession.setProxy({ proxyRules: settings.proxyUrl }).catch((err) => {
+      console.warn('[Proxy] 设置代理失败:', err);
+    });
+    console.log(`[Proxy] 已为媒体播放器与会话应用代理: ${settings.proxyUrl}`);
+  } else {
+    // 默认跟随系统代理
+    session.defaultSession.setProxy({ mode: 'system' }).catch(() => {});
+  }
+}
+
+function setupMediaNetworkInterceptors() {
+  // 1. 跨域头自动修复（避免各平台 CDN 未声明 CORS 导致 HLS/FLV 播放被拦截）
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    const responseHeaders = details.responseHeaders || {};
+    responseHeaders['access-control-allow-origin'] = ['*'];
+    responseHeaders['access-control-allow-headers'] = ['*'];
+    responseHeaders['access-control-allow-methods'] = ['GET, HEAD, OPTIONS'];
+    callback({ responseHeaders });
+  });
+
+  // 2. 根据视频流来源自动注入合法 Referer、Origin 和标准浏览器 User-Agent，突破防盗链
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const requestHeaders = details.requestHeaders || {};
+    const url = details.url.toLowerCase();
+
+    if (url.includes('googlevideo.com') || url.includes('youtube.com')) {
+      requestHeaders['Referer'] = 'https://www.youtube.com/';
+      requestHeaders['Origin'] = 'https://www.youtube.com';
+    } else if (url.includes('bilibili.com') || url.includes('bilivideo.com')) {
+      requestHeaders['Referer'] = 'https://live.bilibili.com/';
+      requestHeaders['Origin'] = 'https://live.bilibili.com';
+    } else if (url.includes('douyin.com') || url.includes('bytevcloud.com') || url.includes('amemv.com')) {
+      requestHeaders['Referer'] = 'https://live.douyin.com/';
+      requestHeaders['Origin'] = 'https://live.douyin.com';
+    } else if (url.includes('kuaishou.com') || url.includes('yximgs.com')) {
+      requestHeaders['Referer'] = 'https://live.kuaishou.com/';
+      requestHeaders['Origin'] = 'https://live.kuaishou.com';
+    } else if (url.includes('huya.com')) {
+      requestHeaders['Referer'] = 'https://www.huya.com/';
+      requestHeaders['Origin'] = 'https://www.huya.com';
+    } else if (url.includes('douyu.com')) {
+      requestHeaders['Referer'] = 'https://www.douyu.com/';
+      requestHeaders['Origin'] = 'https://www.douyu.com';
+    }
+
+    if (!requestHeaders['User-Agent'] || requestHeaders['User-Agent'].includes('Electron')) {
+      requestHeaders['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    }
+
+    callback({ requestHeaders });
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1320,
@@ -143,7 +199,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
+      webSecurity: false,
     },
   });
 
@@ -261,6 +318,9 @@ function registerIpc() {
   ipcMain.handle('store:save', (_event, key, data) => {
     if (!STORE_KEYS.has(key)) throw new Error('非法存储键');
     writeStore(key, data);
+    if (key === 'settings') {
+      applyProxySettings();
+    }
   });
 
   ipcMain.handle('dialog:selectDirectory', async () => {
@@ -359,6 +419,8 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     registerIpc();
+    setupMediaNetworkInterceptors();
+    applyProxySettings();
     await startSidecar();
     createWindow();
     recorder = new StreamRecorderManager(() => mainWindow);

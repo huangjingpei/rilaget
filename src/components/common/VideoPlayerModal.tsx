@@ -11,7 +11,11 @@ import {
   Radio,
   Sparkles,
   Info,
-  Check
+  Check,
+  RefreshCw,
+  Copy,
+  AlertTriangle,
+  ExternalLink,
 } from 'lucide-react';
 import { logger } from '../../services/logger';
 
@@ -43,6 +47,8 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
   const [snapshotSuccess, setSnapshotSuccess] = useState(false);
   const [showTechInfo, setShowTechInfo] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+  const [copiedStreamUrl, setCopiedStreamUrl] = useState(false);
   const [streamMeta, setStreamMeta] = useState<{
     width: number;
     height: number;
@@ -61,6 +67,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
     const lower = streamUrl.toLowerCase();
     const isFlv = lower.includes('.flv') || lower.includes('format=flv');
     const isM3u8 = lower.includes('.m3u8') || lower.includes('format=m3u8') || lower.includes('/hls');
+    const isYoutube = lower.includes('googlevideo.com') || lower.includes('youtube.com');
 
     const destroyCurrent = () => {
       if (mpegtsPlayerRef.current) {
@@ -130,17 +137,53 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
+          backBufferLength: 60,
+          maxBufferLength: 30,
+          manifestLoadingTimeOut: 15000,
+          manifestLoadingMaxRetry: 4,
+          levelLoadingTimeOut: 15000,
+          levelLoadingMaxRetry: 4,
+          fragLoadingTimeOut: 20000,
+          fragLoadingMaxRetry: 5,
+          xhrSetup: (xhr) => {
+            xhr.withCredentials = false;
+          },
         });
         hls.loadSource(streamUrl);
         hls.attachMedia(video);
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           safePlay(video);
+          setLoadError(null);
         });
+
+        let networkErrorRetries = 0;
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal) {
-            setLoadError(`HLS 流加载异常: ${data.details}`);
+            console.warn('[VideoPlayer] HLS fatal error:', data.type, data.details);
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                if (networkErrorRetries < 2) {
+                  networkErrorRetries++;
+                  console.log(`[VideoPlayer] 尝试自动恢复 HLS 网络加载 (${networkErrorRetries}/2)...`);
+                  hls.startLoad();
+                } else {
+                  const extra = isYoutube
+                    ? '（YouTube 流媒体服务器位于海外，若无法连接请确保已在客户端 [系统设置] 中开启代理配置，如 http://127.0.0.1:7890）'
+                    : '';
+                  setLoadError(`HLS 流加载异常: ${data.details} ${extra}`);
+                }
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.log('[VideoPlayer] 尝试媒体解码错误自动恢复...');
+                hls.recoverMediaError();
+                break;
+              default:
+                setLoadError(`HLS 流加载异常: ${data.details}`);
+                break;
+            }
           }
         });
+
         hlsPlayerRef.current = hls;
         setStreamMeta((prev) => ({ ...prev, format: 'HLS (hls.js 引擎)' }));
       } catch (err: any) {
@@ -156,7 +199,7 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
       video.removeEventListener('loadedmetadata', onLoadedMetadata);
       destroyCurrent();
     };
-  }, [isOpen, streamUrl, isLive]);
+  }, [isOpen, streamUrl, isLive, retryCount]);
 
   if (!isOpen) return null;
 
@@ -277,11 +320,41 @@ export const VideoPlayerModal: React.FC<VideoPlayerModalProps> = ({
             onPause={() => setIsPlaying(false)}
           />
 
-          {/* Load Error Alert */}
+          {/* Centered Load Error Recovery Panel */}
           {loadError && (
-            <div className="absolute top-4 right-4 p-3 rounded-xl bg-rose-950/90 border border-rose-600 text-rose-200 text-xs z-20 max-w-md shadow-xl">
-              <div className="font-bold mb-1">播放提示</div>
-              <div>{loadError}</div>
+            <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20 space-y-3">
+              <div className="w-12 h-12 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="max-w-md space-y-1">
+                <h4 className="text-sm font-bold text-white">流媒体加载异常</h4>
+                <p className="text-xs text-rose-300 leading-relaxed font-mono">{loadError}</p>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  onClick={() => {
+                    setLoadError(null);
+                    setRetryCount((c) => c + 1);
+                  }}
+                  className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow transition-colors"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>重新加载</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(streamUrl);
+                    setCopiedStreamUrl(true);
+                    setTimeout(() => setCopiedStreamUrl(false), 2000);
+                  }}
+                  className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 flex items-center gap-1.5 transition-colors"
+                >
+                  {copiedStreamUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedStreamUrl ? '已复制流地址' : '复制流地址 (外部播放)'}</span>
+                </button>
+              </div>
             </div>
           )}
 
