@@ -140,12 +140,14 @@ export const DataScraperView: React.FC = () => {
             onClick={() => scraperService.setHeadless(data.headless === false ? true : false)}
             className={`px-2 py-1 rounded-lg text-xs font-medium border flex items-center gap-1 transition-colors ${
               data.headless !== false
-                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
                 : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
             }`}
-            title={data.headless !== false ? '无头静默运行（资源消耗极低）' : '前台弹出浏览器窗口'}
+            title={data.headless !== false
+              ? '⚠️ 无头模式：大多数平台（抖音/B站等）会检测并屏蔽无头浏览器，导致收不到弹幕。建议切换为可见窗口。'
+              : '✅ 可见窗口模式（推荐）：浏览器弹出真实窗口，弹幕捕获稳定可靠'}
           >
-            <span>{data.headless !== false ? '无头模式' : '可见窗口'}</span>
+            <span>{data.headless !== false ? '⚠️ 无头模式' : '✅ 可见窗口'}</span>
           </button>
 
           <button

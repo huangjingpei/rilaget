@@ -13,7 +13,7 @@ class ScraperService {
     this.data = {
       roomId: '',
       url: '',
-      headless: true,
+      headless: false,
       platform: 'douyin',
       anchorName: '未选择房间',
       liveTitle: '请在上方选择或输入要采集弹幕的直播间',
