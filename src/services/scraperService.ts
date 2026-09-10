@@ -31,15 +31,21 @@ class ScraperService {
   private initDanmakuBridge() {
     const api = electronApi();
     const isElec = inElectron();
+    const hasBridge = isElec && !!api?.sidecar?.onDanmaku;
     console.log('[ScraperService] initDanmakuBridge:', { isElec, hasApi: !!api, hasSidecar: !!api?.sidecar, hasOnDanmaku: !!api?.sidecar?.onDanmaku });
-    if (isElec && api?.sidecar?.onDanmaku) {
-      api.sidecar.onDanmaku((packet) => {
+    // 延迟写日志，等 logger 单例就绪
+    setTimeout(() => {
+      if (hasBridge) {
+        logger.addLog('debug', 'MONITOR', '[弹幕桥] IPC 监听器已注册 ✓（Electron 环境）');
+      } else {
+        logger.addLog('warn', 'MONITOR', `[弹幕桥] 未注册：isElectron=${isElec}，window.streamget=${typeof window !== 'undefined' ? !!window.streamget : 'N/A'}`);
+      }
+    }, 500);
+    if (hasBridge) {
+      api!.sidecar.onDanmaku((packet) => {
         console.log('[ScraperService] onDanmaku packet received:', packet);
         this.handleIncomingPacket(packet);
       });
-      console.log('[ScraperService] danmaku IPC listener registered ✓');
-    } else {
-      console.warn('[ScraperService] danmaku bridge NOT set up — isElec:', isElec, 'api:', api);
     }
   }
 
