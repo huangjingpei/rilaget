@@ -270,6 +270,17 @@ const PLATFORM_LOGIN_CONFIGS: Record<PlatformId, PlatformLoginConfig> = {
   },
 };
 
+function formatTestedTime(timestamp?: number): string {
+  if (!timestamp) return '未校验';
+  const now = Date.now();
+  const diff = now - timestamp;
+  if (diff < 30000) return '刚刚';
+  if (diff < 60000) return '半分钟前';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} 分钟前`;
+  const d = new Date(timestamp);
+  return `${d.getMonth() + 1}-${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+}
+
 export const EmbeddedBrowserView: React.FC = () => {
   const [activeSubTab, setActiveSubTab] = useState<'cookie_vault' | 'web_login' | 'guide'>('cookie_vault');
   const [cookies, setCookies] = useState<PlatformCookie[]>([]);
@@ -281,6 +292,7 @@ export const EmbeddedBrowserView: React.FC = () => {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [testingId, setTestingId] = useState<string | null>(null);
+  const [justTestedId, setJustTestedId] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
 
   // Add Cookie Modal
   const [isManualModalOpen, setIsManualModalOpen] = useState(false);
@@ -305,7 +317,12 @@ export const EmbeddedBrowserView: React.FC = () => {
   const handleTestCookie = async (id: string) => {
     setTestingId(id);
     try {
-      await cookieService.testCookie(id);
+      const res = await cookieService.testCookie(id);
+      setJustTestedId({ id, ok: res.isValid, msg: res.message });
+      setTimeout(() => setJustTestedId(null), 4000);
+    } catch (e: any) {
+      setJustTestedId({ id, ok: false, msg: e?.message || '校验发生异常' });
+      setTimeout(() => setJustTestedId(null), 4000);
     } finally {
       setTestingId(null);
     }
@@ -499,53 +516,109 @@ export const EmbeddedBrowserView: React.FC = () => {
             ) : (
               <div className="flex-1 divide-y divide-slate-800/60 overflow-y-auto">
                 {cookies.map((ck) => (
-                  <div key={ck.id} className="p-3 hover:bg-slate-800/40 transition-colors space-y-2 text-xs">
+                  <div
+                    key={ck.id}
+                    className={`p-3.5 transition-all space-y-2 text-xs ${
+                      justTestedId?.id === ck.id
+                        ? justTestedId.ok
+                          ? 'bg-emerald-500/10 border-l-4 border-l-emerald-500'
+                          : 'bg-rose-500/10 border-l-4 border-l-rose-500'
+                        : 'hover:bg-slate-800/40'
+                    }`}
+                  >
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 font-mono text-emerald-400 font-bold uppercase text-[10px]">
                           {ck.platform}
                         </span>
-                        <span className="font-bold text-white">{ck.accountName}</span>
+                        <span className="font-bold text-white text-xs">{ck.accountName}</span>
                         {ck.isValid ? (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
-                            <ShieldCheck className="w-3 h-3" />
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1 font-medium">
+                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
                             <span>凭据有效</span>
                           </span>
                         ) : (
-                          <span className="text-[9px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1">
-                            <AlertCircle className="w-3 h-3" />
+                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 flex items-center gap-1 font-medium">
+                            <AlertCircle className="w-3 h-3 text-rose-400" />
                             <span>格式不全 / 已失效</span>
                           </span>
                         )}
+                        <span className="text-slate-500 text-[10px]">
+                          最后校验: <strong className="text-slate-400 font-mono">{formatTestedTime(ck.lastTestedAt)}</strong>
+                        </span>
                         <span className="text-slate-500 text-[10px]">来源: {ck.extractedFrom || '手动录入'}</span>
                       </div>
 
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 shrink-0">
                         <button
                           onClick={() => handleTestCookie(ck.id)}
                           disabled={testingId === ck.id}
-                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 flex items-center gap-1 border border-slate-700/60"
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-medium flex items-center gap-1.5 border transition-all ${
+                            testingId === ck.id
+                              ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-sm'
+                              : justTestedId?.id === ck.id
+                              ? justTestedId.ok
+                                ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 font-bold'
+                                : 'bg-rose-500/20 text-rose-300 border-rose-500/50 font-bold'
+                              : 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700/60'
+                          }`}
                           title="校验关键 Token 格式与有效性"
                         >
-                          <RefreshCw className={`w-3 h-3 ${testingId === ck.id ? 'animate-spin text-cyan-400' : ''}`} />
-                          <span>{testingId === ck.id ? '校验中' : '校验'}</span>
+                          {testingId === ck.id ? (
+                            <>
+                              <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                              <span>校验中...</span>
+                            </>
+                          ) : justTestedId?.id === ck.id ? (
+                            <>
+                              {justTestedId.ok ? (
+                                <Check className="w-3 h-3 text-emerald-400" />
+                              ) : (
+                                <AlertCircle className="w-3 h-3 text-rose-400" />
+                              )}
+                              <span>{justTestedId.ok ? '校验通过 ✓' : '校验未通过'}</span>
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCw className="w-3 h-3" />
+                              <span>校验</span>
+                            </>
+                          )}
                         </button>
                         <button
                           onClick={() => handleCopy(ck.id, ck.cookieString)}
-                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 flex items-center gap-1 border border-slate-700/60"
+                          className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 flex items-center gap-1 border border-slate-700/60 transition-colors"
                         >
                           {copiedId === ck.id ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
                           <span>复制</span>
                         </button>
                         <button
                           onClick={() => cookieService.deleteCookie(ck.id)}
-                          className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-rose-400 border border-slate-800"
+                          className="p-1 rounded-lg hover:bg-slate-700 text-slate-500 hover:text-rose-400 border border-slate-800 transition-colors"
                           title="删除此凭据"
                         >
                           <Trash2 className="w-3 h-3" />
                         </button>
                       </div>
                     </div>
+
+                    {/* Detailed Diagnostic Message */}
+                    {ck.lastTestedMsg && (
+                      <div
+                        className={`px-2.5 py-1.5 rounded-lg border text-[11px] flex items-start gap-2 ${
+                          ck.isValid
+                            ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                            : 'bg-rose-500/10 border-rose-500/25 text-rose-300'
+                        }`}
+                      >
+                        {ck.isValid ? (
+                          <ShieldCheck className="w-3.5 h-3.5 shrink-0 mt-0.5 text-emerald-400" />
+                        ) : (
+                          <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5 text-rose-400" />
+                        )}
+                        <span className="leading-relaxed">{ck.lastTestedMsg}</span>
+                      </div>
+                    )}
 
                     <div className="p-2 bg-slate-950 rounded-lg border border-slate-800 font-mono text-[10px] text-slate-400 truncate select-all">
                       {ck.cookieString}

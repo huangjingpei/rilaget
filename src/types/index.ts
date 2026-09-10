@@ -155,6 +155,7 @@ export interface PlatformCookie {
   isVip: boolean;
   isValid: boolean;
   lastTestedAt: number;
+  lastTestedMsg?: string;
   expiresAt?: string;
   extractedFrom: 'qr_scan' | 'embedded_browser' | 'manual_input';
 }
