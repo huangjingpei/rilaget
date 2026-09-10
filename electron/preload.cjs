@@ -22,6 +22,14 @@ contextBridge.exposeInMainWorld('streamget', {
       ipcRenderer.on('sidecar:log', listener);
       return () => ipcRenderer.removeListener('sidecar:log', listener);
     },
+    danmakuStart: (payload) => ipcRenderer.invoke('sidecar:danmakuStart', payload),
+    danmakuStop: (payload) => ipcRenderer.invoke('sidecar:danmakuStop', payload),
+    danmakuStatus: () => ipcRenderer.invoke('sidecar:danmakuStatus'),
+    onDanmaku: (cb) => {
+      const listener = (_event, data) => cb(data);
+      ipcRenderer.on('sidecar:danmaku', listener);
+      return () => ipcRenderer.removeListener('sidecar:danmaku', listener);
+    },
   },
   store: {
     load: (key) => ipcRenderer.invoke('store:load', key),

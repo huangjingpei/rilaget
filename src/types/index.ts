@@ -212,6 +212,8 @@ export interface DanmakuMessage {
 
 export interface StreamScrapeData {
   roomId: string;
+  url?: string;
+  headless?: boolean;
   platform: PlatformId;
   anchorName: string;
   liveTitle: string;

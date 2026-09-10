@@ -3,6 +3,8 @@ import { logger } from './logger';
 import { loadStore, makePersister } from './persistence';
 import { settingsService } from './settingsService';
 import { electronApi, inElectron } from './electronBridge';
+import { parseStreamUrl } from './streamParser';
+import { cookieService } from './cookieService';
 import confetti from 'canvas-confetti';
 
 type TaskListener = (tasks: DownloadTask[]) => void;
@@ -185,30 +187,67 @@ class DownloadEngine {
     this.notify();
   }
 
-  public resumeTask(id: string) {
+  public async resumeTask(id: string) {
     this.hasLocalChanges = true;
-    let targetTask: DownloadTask | undefined;
+    const existing = this.tasks.find((t) => t.id === id);
+    if (!existing) return;
+
+    let targetTask: DownloadTask = existing;
+
+    // 针对直播流任务，由于 CDN 鉴权 Token (wsSecret/wsTime/auth) 具有时效性，
+    // 在恢复或重启时先执行一次 JIT 快速探测，获取最新有效推流地址
+    if (targetTask.isLiveStream && targetTask.url) {
+      logger.addLog('info', 'DOWNLOADER', `正在 JIT 刷新直播推流鉴权: [${targetTask.platformName}] ${targetTask.anchorName}`);
+      try {
+        const cookie = cookieService.getCookieForPlatform(targetTask.platform);
+        const freshParsed = await parseStreamUrl(targetTask.url, cookie);
+        if (!freshParsed.isLive || freshParsed.qualities.length === 0) {
+          logger.addLog('warn', 'DOWNLOADER', `恢复录制失败：[${targetTask.anchorName}] 当前已下播`);
+          this.tasks = this.tasks.map((t) =>
+            t.id === id ? { ...t, status: 'completed' as DownloadStatus, speedBytesPerSec: 0 } : t
+          );
+          this.persister.schedule();
+          this.notify();
+          return;
+        }
+
+        const freshQuality =
+          freshParsed.qualities.find((q) => q.id === targetTask.quality.id) || freshParsed.qualities[0];
+
+        targetTask = {
+          ...targetTask,
+          streamUrl: freshQuality.url,
+          quality: freshQuality,
+          status: 'recording' as DownloadStatus,
+        };
+        logger.addLog('success', 'DOWNLOADER', `已为任务 [${targetTask.title}] 刷新有效推流地址 (${freshQuality.name})`);
+      } catch (err: any) {
+        logger.addLog('warn', 'DOWNLOADER', `推流地址刷新遇到异常，尝试使用原地址继续: ${err?.message || err}`);
+      }
+    }
+
     this.tasks = this.tasks.map((t) => {
       if (t.id === id) {
-        targetTask = t;
         logger.addLog('info', 'DOWNLOADER', `恢复下载任务: ${t.title}`);
         return {
           ...t,
+          streamUrl: targetTask.streamUrl,
+          quality: targetTask.quality,
           status: t.isLiveStream ? ('recording' as DownloadStatus) : ('downloading' as DownloadStatus),
         };
       }
       return t;
     });
 
-    if (targetTask) {
-      const api = electronApi();
-      if (inElectron() && api?.recorder) {
-        api.recorder.start({
-          taskId: targetTask.id,
-          url: targetTask.streamUrl,
-          filePath: targetTask.filePath,
-        }).catch(() => {});
-      }
+    const api = electronApi();
+    if (inElectron() && api?.recorder) {
+      api.recorder.start({
+        taskId: targetTask.id,
+        url: targetTask.streamUrl,
+        filePath: targetTask.filePath,
+      }).catch((err: any) => {
+        logger.addLog('error', 'DOWNLOADER', `启动录制器失败: ${err?.message || err}`);
+      });
     }
 
     this.persister.schedule();

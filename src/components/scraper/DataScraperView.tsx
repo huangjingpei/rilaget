@@ -54,13 +54,31 @@ export const DataScraperView: React.FC = () => {
     };
   }, []);
 
+  const [customUrlInput, setCustomUrlInput] = useState('');
+
   const handleSelectAnchor = (anchor: MonitoredAnchor) => {
-    scraperService.setTargetRoom(anchor.platform, anchor.roomId || anchor.id, anchor.name, anchor.currentTitle);
+    scraperService.setTargetRoom(anchor.platform, anchor.roomId || anchor.id, anchor.name, anchor.currentTitle, anchor.url);
     setIsSelectModalOpen(false);
   };
 
   const handleSelectTask = (task: DownloadTask) => {
-    scraperService.setTargetRoom(task.platform, task.id, task.anchorName, task.title);
+    scraperService.setTargetRoom(task.platform, task.id, task.anchorName, task.title, task.url);
+    setIsSelectModalOpen(false);
+  };
+
+  const handleApplyCustomUrl = () => {
+    const trimmed = customUrlInput.trim();
+    if (!trimmed) return;
+    let detectedPlatform: PlatformId = 'douyin';
+    for (const p of SUPPORTED_PLATFORMS) {
+      if (new RegExp(p.urlPattern, 'i').test(trimmed)) {
+        detectedPlatform = p.id;
+        break;
+      }
+    }
+    const platformName = SUPPORTED_PLATFORMS.find((p) => p.id === detectedPlatform)?.name || '直播间';
+    scraperService.setTargetRoom(detectedPlatform, trimmed, platformName, trimmed, trimmed);
+    setCustomUrlInput('');
     setIsSelectModalOpen(false);
   };
 
@@ -116,6 +134,18 @@ export const DataScraperView: React.FC = () => {
           >
             <Target className="w-3 h-3 text-cyan-400" />
             <span>选择目标直播间</span>
+          </button>
+
+          <button
+            onClick={() => scraperService.setHeadless(data.headless === false ? true : false)}
+            className={`px-2 py-1 rounded-lg text-xs font-medium border flex items-center gap-1 transition-colors ${
+              data.headless !== false
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                : 'bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border-cyan-500/40'
+            }`}
+            title={data.headless !== false ? '无头静默运行（资源消耗极低）' : '前台弹出浏览器窗口'}
+          >
+            <span>{data.headless !== false ? '无头模式' : '可见窗口'}</span>
           </button>
 
           <button
@@ -389,6 +419,31 @@ export const DataScraperView: React.FC = () => {
             </div>
 
             <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {/* Direct URL Input */}
+              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+                <span className="text-[11px] font-bold text-slate-300 flex items-center gap-1">
+                  <Radio className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>直接输入/粘贴直播间链接</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={customUrlInput}
+                    onChange={(e) => setCustomUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleApplyCustomUrl()}
+                    placeholder="如: https://live.douyin.com/123456 或 https://live.bilibili.com/6"
+                    className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-slate-200 placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500"
+                  />
+                  <button
+                    onClick={handleApplyCustomUrl}
+                    disabled={!customUrlInput.trim()}
+                    className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white font-medium text-xs transition-colors shrink-0"
+                  >
+                    确定选择
+                  </button>
+                </div>
+              </div>
+
               {/* Monitored Anchors Section */}
               <div className="space-y-1.5">
                 <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">

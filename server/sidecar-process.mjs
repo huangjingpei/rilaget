@@ -127,6 +127,10 @@ export class SidecarProcess extends EventEmitter {
         this.emit('log', msg);
         continue;
       }
+      if (msg.event === 'danmaku') {
+        this.emit('danmaku', msg);
+        continue;
+      }
       const p = this.pending.get(msg.id);
       if (!p) continue;
       this.pending.delete(msg.id);

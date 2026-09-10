@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import threading
 import traceback
 from pathlib import Path
 
@@ -46,10 +47,14 @@ for _s in (sys.stdout, sys.stderr):
     except Exception:
         pass
 
+_SEND_LOCK = threading.Lock()
+
 
 def send(obj: dict) -> None:
     try:
-        os.write(_PROTO_FD, (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8"))
+        data = (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
+        with _SEND_LOCK:
+            os.write(_PROTO_FD, data)
     except OSError:
         pass  # 宿主已关闭管道，进程即将退出
 
@@ -238,7 +243,110 @@ async def cmd_parse(req):
     }
 
 
-COMMANDS = {"ping": cmd_ping, "platforms": cmd_platforms, "parse": cmd_parse}
+# ---------------------------------------------------------------- 弹幕采集引擎管理
+_DANMA_DIR = Path(__file__).resolve().parent / "danma"
+sys.path.insert(0, str(_DANMA_DIR))
+
+_danmaku_collector = None
+_danmaku_thread = None
+_danmaku_lock = threading.Lock()
+_danmaku_info = {"running": False, "roomId": "", "url": "", "platform": ""}
+
+
+def _on_danmaku_packet(room_id: str, data) -> None:
+    if not data:
+        return
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                send({"event": "danmaku", "roomId": room_id, "data": item})
+    elif isinstance(data, dict):
+        send({"event": "danmaku", "roomId": room_id, "data": data})
+
+
+async def cmd_danmaku_start(req):
+    global _danmaku_collector, _danmaku_thread, _danmaku_info
+    url = str(req.get("url") or "").strip()
+    platform = str(req.get("platform") or "douyin").strip().lower()
+    room_id = str(req.get("roomId") or url).strip()
+    headless = bool(req.get("headless", True))
+
+    if not url:
+        raise ValueError("缺少直播间 url 参数")
+
+    with _danmaku_lock:
+        if _danmaku_collector:
+            try:
+                emit_log("info", f"[Danmaku] 停止前序采集任务: {_danmaku_info.get('url')}")
+                _danmaku_collector.browser_close()
+            except Exception:
+                pass
+            _danmaku_collector = None
+            _danmaku_thread = None
+
+        try:
+            from main import DanmuBrowserCollector  # noqa: E402
+        except Exception as exc:
+            raise RuntimeError(f"弹幕采集引擎加载失败: {exc}") from exc
+
+        emit_log("info", f"[Danmaku] 正在启动弹幕采集器: [{platform}] {url} (headless={headless})")
+
+        collector = DanmuBrowserCollector(
+            platform=platform,
+            url=url,
+            headless=headless,
+            message_callback=lambda data: _on_danmaku_packet(room_id, data),
+            log_fn=lambda msg: emit_log("debug", f"[DanmaEngine] {msg}"),
+        )
+
+        def run_collector():
+            try:
+                collector.browser_launch()
+            except Exception as e:
+                emit_log("error", f"[DanmaEngine] 采集运行异常: {e}")
+            finally:
+                with _danmaku_lock:
+                    if _danmaku_collector is collector:
+                        _danmaku_info["running"] = False
+
+        thread = threading.Thread(target=run_collector, daemon=True, name="DanmakuCollectorThread")
+        _danmaku_collector = collector
+        _danmaku_thread = thread
+        _danmaku_info = {"running": True, "roomId": room_id, "url": url, "platform": platform}
+        thread.start()
+
+    return {"started": True, "roomId": room_id, "url": url, "platform": platform}
+
+
+async def cmd_danmaku_stop(_req=None):
+    global _danmaku_collector, _danmaku_thread, _danmaku_info
+    with _danmaku_lock:
+        if _danmaku_collector:
+            emit_log("info", f"[Danmaku] 停止弹幕采集器: {_danmaku_info.get('roomId')}")
+            try:
+                _danmaku_collector.browser_close()
+            except Exception:
+                pass
+            _danmaku_collector = None
+            _danmaku_thread = None
+            _danmaku_info["running"] = False
+            return {"stopped": True}
+    return {"stopped": False, "message": "当前无运行中的采集任务"}
+
+
+async def cmd_danmaku_status(_req=None):
+    with _danmaku_lock:
+        return dict(_danmaku_info)
+
+
+COMMANDS = {
+    "ping": cmd_ping,
+    "platforms": cmd_platforms,
+    "parse": cmd_parse,
+    "danmaku.start": cmd_danmaku_start,
+    "danmaku.stop": cmd_danmaku_stop,
+    "danmaku.status": cmd_danmaku_status,
+}
 PARSE_TIMEOUT_S = 90
 
 
@@ -255,6 +363,12 @@ def main() -> int:
     while True:
         line = sys.stdin.readline()
         if not line:  # 宿主关闭 stdin
+            with _danmaku_lock:
+                if _danmaku_collector:
+                    try:
+                        _danmaku_collector.browser_close()
+                    except Exception:
+                        pass
             return 0
         line = line.strip()
         if not line:
@@ -270,6 +384,12 @@ def main() -> int:
         cmd = req.get("cmd")
         try:
             if cmd == "shutdown":
+                with _danmaku_lock:
+                    if _danmaku_collector:
+                        try:
+                            _danmaku_collector.browser_close()
+                        except Exception:
+                            pass
                 send({"id": rid, "ok": True, "data": None})
                 return 0
             handler = COMMANDS.get(cmd)

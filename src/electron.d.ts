@@ -25,6 +25,19 @@ type StreamgetSidecarStatus = {
   error?: string;
 };
 
+type StreamgetDanmakuPacket = {
+  event: 'danmaku';
+  roomId: string;
+  data: Record<string, any>;
+};
+
+type StreamgetDanmakuStartPayload = {
+  platform: string;
+  url: string;
+  roomId?: string;
+  headless?: boolean;
+};
+
 type StreamRecorderProgressPayload = {
   taskId: string;
   downloadedBytes: number;
@@ -51,6 +64,10 @@ interface Window {
       platforms: () => Promise<{ key: string; label: string; class: string; available: boolean }[]>;
       parse: (payload: StreamgetSidecarParsePayload) => Promise<Record<string, unknown>>;
       onLog: (cb: (data: StreamgetSidecarLogPayload) => void) => () => void;
+      danmakuStart: (payload: StreamgetDanmakuStartPayload) => Promise<{ started: boolean; roomId: string; url: string; platform: string }>;
+      danmakuStop: (payload?: { roomId?: string }) => Promise<{ stopped: boolean; message?: string }>;
+      danmakuStatus: () => Promise<{ running: boolean; roomId: string; url: string; platform: string }>;
+      onDanmaku: (cb: (data: StreamgetDanmakuPacket) => void) => () => void;
     };
     store: {
       load: (key: 'settings' | 'tasks' | 'anchors' | 'cookies') => Promise<unknown | null>;

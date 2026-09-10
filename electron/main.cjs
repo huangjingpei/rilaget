@@ -243,6 +243,16 @@ function registerIpc() {
       proxy: payload.proxy || null,
     });
   });
+  ipcMain.handle('sidecar:danmakuStart', async (_event, payload) => {
+    if (!payload?.url) throw new Error('缺少直播间 url 参数');
+    return sidecar.request('danmaku.start', payload, 60000);
+  });
+  ipcMain.handle('sidecar:danmakuStop', async (_event, payload) => {
+    return sidecar.request('danmaku.stop', payload || {}, 15000);
+  });
+  ipcMain.handle('sidecar:danmakuStatus', async () => {
+    return sidecar.request('danmaku.status', {}, 5000);
+  });
 
   ipcMain.handle('store:load', (_event, key) => {
     if (!STORE_KEYS.has(key)) throw new Error('非法存储键');
@@ -325,6 +335,11 @@ async function startSidecar() {
     }
     if (payload?.message) {
       console.log(`[sidecar:${payload.level || 'info'}] ${payload.message}`);
+    }
+  });
+  sidecar.on('danmaku', (payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sidecar:danmaku', payload);
     }
   });
   sidecar.start();

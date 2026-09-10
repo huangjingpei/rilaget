@@ -1,5 +1,6 @@
 import { DanmakuMessage, PlatformId, StreamScrapeData } from '../types';
 import { logger } from './logger';
+import { electronApi, inElectron } from './electronBridge';
 
 type ScraperListener = (data: StreamScrapeData) => void;
 
@@ -11,6 +12,8 @@ class ScraperService {
   constructor() {
     this.data = {
       roomId: '',
+      url: '',
+      headless: true,
       platform: 'douyin',
       anchorName: '未选择房间',
       liveTitle: '请在上方选择或输入要采集弹幕的直播间',
@@ -22,6 +25,107 @@ class ScraperService {
       danmakuList: [],
       isScraping: false,
     };
+    this.initDanmakuBridge();
+  }
+
+  private initDanmakuBridge() {
+    const api = electronApi();
+    if (inElectron() && api?.sidecar?.onDanmaku) {
+      api.sidecar.onDanmaku((packet) => {
+        this.handleIncomingPacket(packet);
+      });
+    }
+  }
+
+  private handleIncomingPacket(packet: StreamgetDanmakuPacket) {
+    if (!packet || !packet.data) return;
+    const raw = packet.data;
+    const rawType = String(raw.type || '');
+
+    if (rawType === 'RoomMessage') {
+      const cnt = parseInt(String(raw.count || 0), 10);
+      if (!isNaN(cnt) && cnt > 0) {
+        this.pushViewerMetric(cnt);
+      }
+      return;
+    }
+
+    if (rawType === 'SystemMessage') {
+      const msg = String(raw.content || '');
+      if (msg) {
+        logger.addLog('info', 'MONITOR', `[采集器] ${msg}`);
+      }
+      return;
+    }
+
+    const norm = this.normalizeMessage(raw);
+    if (norm) {
+      this.pushDanmaku(norm);
+    }
+  }
+
+  private normalizeMessage(raw: any): DanmakuMessage | null {
+    const rawType = String(raw.type || '');
+    const id = `dm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const timestamp = Date.now();
+    const senderName = String(raw.name || raw.senderName || '热心观众').trim();
+    const content = String(raw.content || '').trim();
+
+    if (rawType === 'ChatMessage' || rawType === 'chat') {
+      if (!content) return null;
+      return { id, timestamp, senderName, content, type: 'chat' };
+    }
+
+    if (rawType === 'GiftMessage' || rawType === 'gift') {
+      const giftName = String(raw.gift_name || raw.giftName || '礼物');
+      const giftCount = parseInt(String(raw.gift_count || raw.giftCount || 1), 10) || 1;
+      return {
+        id,
+        timestamp,
+        senderName,
+        content: content || `${giftName} x${giftCount}`,
+        type: 'gift',
+        giftName,
+        giftCount,
+      };
+    }
+
+    if (rawType === 'LikeMessage' || rawType === 'like') {
+      const count = parseInt(String(raw.count || 1), 10) || 1;
+      return {
+        id,
+        timestamp,
+        senderName,
+        content: content || `为直播间点赞了 ${count} 次`,
+        type: 'like',
+      };
+    }
+
+    if (rawType === 'MemberMessage' || rawType === 'enter') {
+      return {
+        id,
+        timestamp,
+        senderName,
+        content: content || '进入直播间',
+        type: 'enter',
+      };
+    }
+
+    if (rawType === 'SocialMessage' || rawType === 'follow') {
+      return {
+        id,
+        timestamp,
+        senderName,
+        content: content || '关注了直播间',
+        type: 'follow',
+      };
+    }
+
+    if (content) {
+      return { id, timestamp, senderName, content, type: 'chat' };
+    }
+
+    return null;
   }
 
   public pushDanmaku(msg: DanmakuMessage) {
@@ -48,11 +152,13 @@ class ScraperService {
     this.notify();
   }
 
-  public setTargetRoom(platform: PlatformId, roomId: string, anchorName: string, title: string) {
+  public setTargetRoom(platform: PlatformId, roomId: string, anchorName: string, title: string, url?: string) {
+    const targetUrl = url || (roomId.startsWith('http') ? roomId : this.data.url || '');
     this.data = {
       ...this.data,
       platform,
       roomId,
+      url: targetUrl,
       anchorName,
       liveTitle: title,
       danmakuCount: 0,
@@ -65,17 +171,56 @@ class ScraperService {
     this.notify();
   }
 
-  public toggleScraping() {
-    this.data.isScraping = !this.data.isScraping;
-    if (this.data.isScraping) {
-      this.sessionStartTime = Date.now();
-    }
-    logger.addLog(
-      this.data.isScraping ? 'success' : 'warn',
-      'MONITOR',
-      `弹幕与数据采集器已${this.data.isScraping ? '启动' : '暂停'}`
-    );
+  public setHeadless(headless: boolean) {
+    this.data.headless = headless;
     this.notify();
+  }
+
+  public async toggleScraping() {
+    if (!this.data.isScraping) {
+      // 启动采集
+      const targetUrl = this.data.url || (this.data.roomId.startsWith('http') ? this.data.roomId : '');
+      if (!targetUrl) {
+        logger.addLog('warn', 'MONITOR', '请先配置或选择包含有效直播间 URL 的目标');
+        return;
+      }
+
+      this.data.isScraping = true;
+      this.sessionStartTime = Date.now();
+      this.notify();
+
+      const api = electronApi();
+      if (inElectron() && api?.sidecar?.danmakuStart) {
+        logger.addLog('info', 'MONITOR', `正在启动浏览器弹幕捕获: [${this.data.platform}] ${targetUrl}`);
+        try {
+          await api.sidecar.danmakuStart({
+            platform: this.data.platform,
+            url: targetUrl,
+            roomId: this.data.roomId,
+            headless: this.data.headless !== false,
+          });
+          logger.addLog('success', 'MONITOR', `弹幕捕获引擎已就绪并开始实时监听`);
+        } catch (err: any) {
+          logger.addLog('error', 'MONITOR', `启动弹幕采集失败: ${err?.message || err}`);
+          this.data.isScraping = false;
+          this.notify();
+        }
+      } else {
+        logger.addLog('warn', 'MONITOR', '当前在纯浏览器环境运行，真实弹幕包捕获需在客户端中运行');
+      }
+    } else {
+      // 停止采集
+      this.data.isScraping = false;
+      this.notify();
+
+      const api = electronApi();
+      if (inElectron() && api?.sidecar?.danmakuStop) {
+        try {
+          await api.sidecar.danmakuStop({ roomId: this.data.roomId });
+          logger.addLog('info', 'MONITOR', '弹幕采集器已停止');
+        } catch {}
+      }
+    }
   }
 
   public clearDanmaku() {

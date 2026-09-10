@@ -97,14 +97,14 @@ class DanmuBrowserCollector:
                         "args": [
                             "--disable-blink-features=AutomationControlled",
                             "--autoplay-policy=no-user-gesture-required",
+                            "--mute-audio",
+                            "--disable-dev-shm-usage",
                         ],
                     }
-                    if self.chrome_path and result.get('path'):
+                    if self.headless:
+                        launch_options["args"].append("--disable-gpu")
+                    if result.get('path'):
                         launch_options["executable_path"] = result['path']
-                    elif result.get('path'):
-                        # Playwright 官方支持 branded Chrome channel；比把自动发现的
-                        # chrome.exe 当作任意 executable_path 更稳定。
-                        launch_options["channel"] = "chrome"
                     self.browser = pw.chromium.launch_persistent_context(**launch_options)
 
                 except Exception as error:
@@ -113,13 +113,37 @@ class DanmuBrowserCollector:
 
                 pages = self.browser.pages
                 self.page = pages[0] if pages else self.browser.new_page()
+
+                # 拦截媒体流与重型静态资源，避免无头浏览器解码 4K/1080P 视频导致 CPU 飙升与带宽浪费
+                def block_heavy_resources(route):
+                    try:
+                        req = route.request
+                        res_type = req.resource_type
+                        low_url = req.url.lower()
+                        if res_type in ("image", "media", "font"):
+                            route.abort()
+                            return
+                        if any(ext in low_url for ext in (
+                            ".flv", ".m3u8", ".ts", ".mp4", ".m4s", ".webm",
+                            ".aac", ".mp3", ".wav", ".woff", ".woff2", ".ttf", ".otf"
+                        )):
+                            route.abort()
+                            return
+                        route.continue_()
+                    except Exception:
+                        try:
+                            route.continue_()
+                        except Exception:
+                            pass
+
+                self.page.route("**/*", block_heavy_resources)
                 self.page.on("websocket", self.wss)
                 self.page.on("response", self.http)
                 self.page.on("load", self.execute_js)
 
                 self.page.goto(self.url, timeout=60000, wait_until="domcontentloaded")
                 self.PostMessage([CreatSystemMessage(
-                    ("采集页面已启动（headless）" if self.headless else "采集页面已启动（可见模式）")
+                    ("采集页面已启动（headless 无头模式）" if self.headless else "采集页面已启动（可见模式）")
                     + f"：{self.page.url}"
                 )])
                 last_refresh = time.monotonic()
@@ -375,34 +399,67 @@ class checkChrome:
         chrome_info_list = []
         candidates = []
         if self.preferred_path:
-            candidates.append(os.path.abspath(os.path.expandvars(self.preferred_path)))
-        which_chrome = shutil.which("chrome") or shutil.which("chrome.exe")
-        if which_chrome:
-            candidates.append(which_chrome)
-        key_paths = [
+            candidates.append((os.path.abspath(os.path.expandvars(self.preferred_path)), "配置的浏览器"))
+
+        # 1. 探测 Google Chrome
+        for bin_name in ("chrome", "chrome.exe"):
+            w = shutil.which(bin_name)
+            if w:
+                candidates.append((w, "Chrome"))
+
+        chrome_keys = [
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
             r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe",
         ]
         for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            for key_path in key_paths:
+            for key_path in chrome_keys:
                 try:
                     with winreg.OpenKey(hive, key_path) as key:
                         path, _ = winreg.QueryValueEx(key, "")
-                        candidates.append(path)
+                        candidates.append((path, "Chrome"))
                 except OSError:
                     pass
+
         candidates.extend([
-            os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
-            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            (os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"), "Chrome"),
+            (os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"), "Chrome"),
+            (os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"), "Chrome"),
         ])
+
+        # 2. 探测 Microsoft Edge（Windows 10/11 预装 Chromium 内核）
+        for bin_name in ("msedge", "msedge.exe"):
+            w = shutil.which(bin_name)
+            if w:
+                candidates.append((w, "Edge"))
+
+        edge_keys = [
+            r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
+            r"SOFTWARE\Wow6432Node\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe",
+        ]
+        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            for key_path in edge_keys:
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        path, _ = winreg.QueryValueEx(key, "")
+                        candidates.append((path, "Edge"))
+                except OSError:
+                    pass
+
+        candidates.extend([
+            (os.path.expandvars(r"%PROGRAMFILES(X86)%\Microsoft\Edge\Application\msedge.exe"), "Edge"),
+            (os.path.expandvars(r"%PROGRAMFILES%\Microsoft\Edge\Application\msedge.exe"), "Edge"),
+            (os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"), "Edge"),
+        ])
+
         seen = set()
-        for path in candidates:
+        for path, bname in candidates:
+            if not path:
+                continue
             normalized = os.path.normcase(os.path.abspath(path))
             if normalized in seen or not os.path.isfile(path):
                 continue
             seen.add(normalized)
-            chrome_info_list.append((path, "已安装"))
+            chrome_info_list.append((path, f"{bname} 已安装"))
         return chrome_info_list
 
     def check(self):
@@ -413,15 +470,15 @@ class checkChrome:
                 'status': True,
                 'path': path,
                 'version': version,
-                'tips': f"使用浏览器：{path}"
+                'tips': f"使用宿主浏览器：{path} ({version})"
             }
         if self.preferred_path:
-            return {'status': False, 'tips': f"配置的 Chrome 不存在：{self.preferred_path}"}
+            return {'status': False, 'tips': f"配置的浏览器不存在：{self.preferred_path}"}
         return {
             'status': True,
             'path': None,
             'version': 'Playwright Chromium',
-            'tips': "未找到本机 Chrome，将尝试 Playwright Chromium"
+            'tips': "未找到本机 Chrome 或 Edge，将尝试 Playwright Chromium"
         }
 
 

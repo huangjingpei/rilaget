@@ -231,6 +231,31 @@ class ActiveRecording {
     }
   }
 
+  getHeaders(targetUrl) {
+    const low = String(targetUrl || '').toLowerCase();
+    /** @type {Record<string, string>} */
+    const headers = {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      Accept: '*/*',
+      ...this.headers,
+    };
+    if (!headers['Referer'] && !headers['referer']) {
+      if (low.includes('douyin') || low.includes('byte') || low.includes('amemv')) {
+        headers['Referer'] = 'https://live.douyin.com/';
+      } else if (low.includes('bilibili') || low.includes('bilivideo') || low.includes('hdslb')) {
+        headers['Referer'] = 'https://live.bilibili.com/';
+      } else if (low.includes('kuaishou') || low.includes('kwai') || low.includes('yximgs')) {
+        headers['Referer'] = 'https://live.kuaishou.com/';
+      } else if (low.includes('huya')) {
+        headers['Referer'] = 'https://www.huya.com/';
+      } else if (low.includes('douyu')) {
+        headers['Referer'] = 'https://www.douyu.com/';
+      }
+    }
+    return headers;
+  }
+
   /**
    * 直接 HTTP/HTTPS 流录制 (FLV / MP4 / TS)
    */
@@ -242,12 +267,7 @@ class ActiveRecording {
       const isHttps = parsedUrl.protocol === 'https:';
       const client = isHttps ? https : http;
 
-      const reqHeaders = {
-        'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        Accept: '*/*',
-        ...this.headers,
-      };
+      const reqHeaders = this.getHeaders(targetUrl);
 
       this.currentReq = client.get(
         parsedUrl,
@@ -391,11 +411,7 @@ class ActiveRecording {
         const req = client.get(
           parsed,
           {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              ...this.headers,
-            },
+            headers: this.getHeaders(targetUrl),
             timeout: 10000,
           },
           (res) => {
@@ -428,11 +444,7 @@ class ActiveRecording {
         const req = client.get(
           parsed,
           {
-            headers: {
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-              ...this.headers,
-            },
+            headers: this.getHeaders(segUrl),
             timeout: 15000,
           },
           (res) => {
